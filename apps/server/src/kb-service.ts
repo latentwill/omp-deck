@@ -238,12 +238,14 @@ export class KbService {
 		const { frontmatter, frontmatterError, body } = parseFrontmatter(raw);
 		const sourceDir = path.posix.dirname(cleanRel);
 		const outgoingLinks = this.extractWikilinks(body, sourceDir === "." ? "" : sourceDir);
+		const bodyForRender = this.rewriteBodyForRender(body, sourceDir === "." ? "" : sourceDir);
 
 		const resp: KbFileResponse = {
 			path: cleanRel,
 			absolutePath: abs,
 			frontmatter,
 			body,
+			bodyForRender,
 			outgoingLinks,
 			size: st.size,
 			mtime: st.mtime.toISOString(),
@@ -414,6 +416,58 @@ export class KbService {
 		return out;
 	}
 
+	/**
+	 * Replace `[[name|label]]` syntax with markdown links the web client
+	 * renders via its custom `a` component. Resolved → `[label](kb-link:<path>?anchor=<a>)`;
+	 * unresolved → `[label](kb-unresolved:<target>)`. Wikilinks inside fenced
+	 * code blocks or inline backtick spans are NOT rewritten — they're noise
+	 * (e.g. regex literals like `[[:alpha:]]`).
+	 */
+	private rewriteBodyForRender(body: string, sourceDir: string): string {
+		// Walk the body marking code-block ranges so we can skip them. A single
+		// linear pass is plenty for the scale we see (~9KB per file).
+		const codeRanges = collectCodeRanges(body);
+		let out = "";
+		let cursor = 0;
+		const re = /\[\[([^\]|\n]+?)(?:\|([^\]\n]+?))?\]\]/g;
+		let m: RegExpExecArray | null;
+		while ((m = re.exec(body)) !== null) {
+			const start = m.index;
+			const end = start + m[0].length;
+			// Emit the body up to this match.
+			out += body.slice(cursor, start);
+			cursor = end;
+			if (insideAnyRange(codeRanges, start)) {
+				out += m[0]; // leave wikilinks inside code blocks alone
+				continue;
+			}
+			const rawTarget = m[1].trim();
+			const labelRaw = (m[2] ?? rawTarget).trim();
+			let target = rawTarget;
+			let anchor: string | null = null;
+			const hashAt = target.indexOf("#");
+			if (hashAt >= 0) {
+				anchor = target.slice(hashAt + 1) || null;
+				target = target.slice(0, hashAt);
+			}
+			target = target.trim();
+			const safeLabel = labelRaw.replace(/[\[\]]/g, "");
+			if (!target) {
+				out += `[${safeLabel}](kb-unresolved:)`;
+				continue;
+			}
+			const { resolved } = this.resolveTarget(target, sourceDir);
+			if (resolved) {
+				const q = anchor ? `?anchor=${encodeURIComponent(anchor)}` : "";
+				out += `[${safeLabel}](kb-link:${encodeURI(resolved)}${q})`;
+			} else {
+				out += `[${safeLabel}](kb-unresolved:${encodeURIComponent(target)})`;
+			}
+		}
+		out += body.slice(cursor);
+		return out;
+	}
+
 	private resolveTarget(
 		target: string,
 		sourceDir: string,
@@ -499,6 +553,43 @@ function parseFrontmatter(text: string): {
 		frontmatterError = (err as Error).message;
 	}
 	return frontmatterError ? { frontmatter, frontmatterError, body } : { frontmatter, body };
+}
+
+/**
+ * Collect `(start, end)` ranges in the body that belong to a fenced code
+ * block (``` … ```) or an inline backtick span. Used by `rewriteBodyForRender`
+ * so wikilinks inside code stay verbatim.
+ */
+function collectCodeRanges(text: string): Array<[number, number]> {
+	const ranges: Array<[number, number]> = [];
+	// Fenced blocks first — they consume their content (including stray backticks).
+	const fenceRe = /```[\s\S]*?(?:```|$)/g;
+	let fenceMatch: RegExpExecArray | null;
+	const fenceCovered: Array<[number, number]> = [];
+	while ((fenceMatch = fenceRe.exec(text)) !== null) {
+		const r: [number, number] = [fenceMatch.index, fenceMatch.index + fenceMatch[0].length];
+		ranges.push(r);
+		fenceCovered.push(r);
+	}
+	// Inline spans, skipping anything already inside a fence.
+	const inlineRe = /`[^`\n]+`/g;
+	let inlineMatch: RegExpExecArray | null;
+	while ((inlineMatch = inlineRe.exec(text)) !== null) {
+		const start = inlineMatch.index;
+		if (insideAnyRange(fenceCovered, start)) continue;
+		ranges.push([start, start + inlineMatch[0].length]);
+	}
+	ranges.sort((a, b) => a[0] - b[0]);
+	return ranges;
+}
+
+function insideAnyRange(ranges: Array<[number, number]>, pos: number): boolean {
+	// Linear scan — n is bounded by the number of code spans in one file.
+	for (const [s, e] of ranges) {
+		if (pos >= s && pos < e) return true;
+		if (s > pos) return false;
+	}
+	return false;
 }
 
 export function resolveKbRoot(): string {

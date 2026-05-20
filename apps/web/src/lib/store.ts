@@ -86,6 +86,13 @@ interface StoreState {
 	 */
 	skillsChangeCounter: number;
 
+	/**
+	 * Counter for `kb_changed` broadcasts. Bumped on any mutation under the
+	 * watched kb root; `KbView` watches it and refetches the current file +
+	 * tree. Same pattern as `tasksChangeCounter` / `skillsChangeCounter`.
+	 */
+	kbChangeCounter: number;
+
 	// ─── Actions ─────────────────────────────────────────────────────────
 	bootstrap(): Promise<void>;
 	connect(): void;
@@ -117,6 +124,7 @@ export const useStore = create<StoreState>()(
 		toolView: { allCollapsed: false, perCard: {} },
 		tasksChangeCounter: 0,
 		skillsChangeCounter: 0,
+		kbChangeCounter: 0,
 		// Hydrate chrome state from localStorage at module init so first render
 		// matches the user's last preference — but only on desktop. On mobile the
 		// panels are overlay drawers and always start closed.
@@ -314,6 +322,10 @@ function handleFrame(
 
 		case "skills_changed":
 			set((s) => ({ skillsChangeCounter: s.skillsChangeCounter + 1 }));
+			return;
+
+		case "kb_changed":
+			set((s) => ({ kbChangeCounter: s.kbChangeCounter + 1 }));
 			return;
 
 		case "session_disposed":

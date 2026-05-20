@@ -385,6 +385,15 @@ export interface KbFileResponse {
 	frontmatterError?: string;
 	/** SKILL.md / article body with frontmatter stripped. */
 	body: string;
+	/**
+	 * Body with wikilinks already substituted to in-app markdown links so the
+	 * web client can render directly through react-markdown without
+	 * understanding `[[…]]` syntax. Resolved links become
+	 * `[label](kb-link:<resolved>?anchor=<a>)`; unresolved links become
+	 * `[label](kb-unresolved:<target>)`. Wikilinks inside fenced code or
+	 * inline backticks are left alone.
+	 */
+	bodyForRender: string;
 	/** Outgoing wikilinks, in order of appearance. */
 	outgoingLinks: KbWikilink[];
 	/** File size in bytes. */
