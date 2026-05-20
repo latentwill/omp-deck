@@ -1,0 +1,819 @@
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { Play, RotateCcw, Save, Square, X } from "lucide-react";
+import type { BridgeInfo, BridgeName, EnvEntry, ListEnvSettingsResponse } from "@omp-deck/protocol";
+
+import { Layout } from "@/components/Layout";
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
+import { bridgesApi } from "@/lib/bridges-api";
+import { settingsApi } from "@/lib/settings-api";
+import { THEMES, useTheme } from "@/lib/theme";
+import { cn } from "@/lib/utils";
+
+const SECTIONS = [
+	{ id: "env", label: "Env", description: "Process and deck-managed variables" },
+	{ id: "messaging", label: "Messaging", description: "Telegram and future chat bridges" },
+	{ id: "appearance", label: "Appearance", description: "Themes, colors, fonts" },
+	{ id: "workspaces", label: "Workspaces", description: "Pinned roots and display names" },
+	{ id: "notifications", label: "Notifications", description: "Idle alerts and quiet hours" },
+	{ id: "about", label: "About", description: "Version, paths, diagnostics" },
+] as const;
+
+type SectionId = (typeof SECTIONS)[number]["id"];
+
+export function SettingsView() {
+	const [params, setParams] = useSearchParams();
+	const selected = normalizeSection(params.get("section"));
+
+	function setSection(section: SectionId): void {
+		const next = new URLSearchParams(params);
+		next.set("section", section);
+		setParams(next, { replace: true });
+	}
+
+	return (
+		<Layout
+			sidebar={<SettingsSideRail />}
+			inspector={<SettingsInspector />}
+			main={
+				<div className="flex h-full min-h-0 flex-col">
+					<div className="flex h-10 shrink-0 items-center gap-2 border-b border-line bg-paper px-3">
+						<div className="meta">Settings</div>
+						<div className="text-xs text-ink-3">Configure this local deck instance</div>
+					</div>
+					<div className="grid min-h-0 flex-1 grid-cols-[220px_1fr] overflow-hidden">
+						<nav className="border-r border-line bg-paper-2/40 p-2">
+							{SECTIONS.map((section) => (
+								<button
+									key={section.id}
+									type="button"
+									onClick={() => setSection(section.id)}
+									className={cn(
+										"mb-1 block w-full rounded-md px-2 py-2 text-left transition-colors",
+										selected === section.id ? "bg-accent-soft text-accent" : "hover:bg-paper-3",
+									)}
+								>
+									<div className="font-mono text-xs font-medium uppercase tracking-meta">
+										{section.label}
+									</div>
+									<div className="mt-0.5 text-xs text-ink-3">{section.description}</div>
+								</button>
+							))}
+						</nav>
+						<section className="min-h-0 overflow-auto p-4">
+							{selected === "env" ? (
+								<EnvSection />
+							) : selected === "messaging" ? (
+								<MessagingSection />
+							) : selected === "appearance" ? (
+								<AppearanceSection />
+							) : (
+								<StubSection section={selected} />
+							)}
+						</section>
+					</div>
+				</div>
+			}
+		/>
+	);
+}
+
+function EnvSection() {
+	const [data, setData] = useState<ListEnvSettingsResponse | null>(null);
+	const [loading, setLoading] = useState(true);
+	const [error, setError] = useState<string | undefined>();
+	const [editing, setEditing] = useState<EnvEntry | null>(null);
+	const [restartMessage, setRestartMessage] = useState<string | undefined>();
+
+	async function refresh(): Promise<void> {
+		try {
+			const next = await settingsApi.listEnv();
+			setData(next);
+			setError(undefined);
+		} catch (e) {
+			setError(String(e));
+		} finally {
+			setLoading(false);
+		}
+	}
+
+	useEffect(() => {
+		void refresh();
+	}, []);
+
+	const grouped = useMemo(() => {
+		const entries = data?.entries ?? [];
+		const isDeckKey = (key: string) =>
+			key.startsWith("OMP_DECK_") ||
+			key === "OMP_AGENT_DIR" ||
+			key === "LOG_LEVEL" ||
+			key === "PI_NO_TITLE" ||
+			key === "OMP_MODEL";
+		const isMessagingKey = (key: string) => key.startsWith("TELEGRAM_") || key.startsWith("SLACK_");
+		return {
+			deck: entries.filter((e) => isDeckKey(e.key)),
+			messaging: entries.filter((e) => isMessagingKey(e.key)),
+			sdk: entries.filter((e) => !isDeckKey(e.key) && !isMessagingKey(e.key)),
+		};
+	}, [data]);
+
+	async function restart(): Promise<void> {
+		try {
+			const resp = await settingsApi.restartServer();
+			setRestartMessage(resp.message || "Restart scheduled");
+		} catch (e) {
+			setError(String(e));
+		}
+	}
+
+	return (
+		<div className="mx-auto max-w-6xl space-y-4">
+			<div>
+				<h1 className="text-xl font-semibold tracking-tight">Environment variables</h1>
+				<p className="mt-1 max-w-3xl text-sm text-ink-3">
+					Edits write to the deck-managed env file only. Variables from the launching process stay
+					higher priority until you remove them from that shell/profile.
+				</p>
+			</div>
+
+			{data?.restartRequired ? (
+				<div className="flex items-center gap-3 rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">
+					<div className="min-w-0 flex-1">
+						Restart server to apply one or more restart-required values from the managed .env.
+					</div>
+					<Button variant="outline" size="sm" onClick={() => void restart()}>
+						<RotateCcw className="h-3.5 w-3.5" />
+						Restart
+					</Button>
+				</div>
+			) : null}
+			{restartMessage ? (
+				<div className="rounded-md border border-success/30 bg-success/10 px-3 py-2 font-mono text-xs text-success">
+					{restartMessage}
+				</div>
+			) : null}
+			{error ? (
+				<div className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 font-mono text-xs text-danger">
+					{error}
+				</div>
+			) : null}
+
+			<div className="rounded-md border border-line bg-paper-2 px-3 py-2 font-mono text-2xs text-ink-3">
+				<div>dataDir: {data?.dataDir ?? "..."}</div>
+				<div>envFile: {data?.envFilePath ?? "..."}</div>
+			</div>
+
+			{loading ? <div className="text-sm text-ink-3">Loading...</div> : null}
+			{data ? (
+				<>
+					<EnvTable title="omp-deck" entries={grouped.deck} onEdit={setEditing} />
+					<EnvTable title="messaging bridges" entries={grouped.messaging} onEdit={setEditing} />
+					<EnvTable title="omp SDK / providers" entries={grouped.sdk} onEdit={setEditing} />
+				</>
+			) : null}
+
+			<EditEnvModal
+				entry={editing}
+				onClose={() => setEditing(null)}
+				onSaved={(next) => {
+					setData(next);
+					setEditing(null);
+				}}
+			/>
+		</div>
+	);
+}
+
+function MessagingSection() {
+	const [data, setData] = useState<ListEnvSettingsResponse | null>(null);
+	const [bridges, setBridges] = useState<BridgeInfo[]>([]);
+	const [loading, setLoading] = useState(true);
+	const [error, setError] = useState<string | undefined>();
+	const [editing, setEditing] = useState<EnvEntry | null>(null);
+
+	async function refresh(): Promise<void> {
+		try {
+			const [envResp, bridgeResp] = await Promise.all([settingsApi.listEnv(), bridgesApi.list()]);
+			setData(envResp);
+			setBridges(bridgeResp.bridges);
+			setError(undefined);
+		} catch (e) {
+			setError(String(e));
+		} finally {
+			setLoading(false);
+		}
+	}
+
+	useEffect(() => {
+		void refresh();
+		const id = window.setInterval(() => {
+			if (document.visibilityState === "visible") void refresh();
+		}, 4000);
+		return () => window.clearInterval(id);
+	}, []);
+
+	const entries = data?.entries ?? [];
+	const telegramToken = entries.find((entry) => entry.key === "TELEGRAM_BOT_TOKEN");
+	const telegramAllowed = entries.find((entry) => entry.key === "TELEGRAM_ALLOWED_USERS");
+	const telegramDb = entries.find((entry) => entry.key === "TELEGRAM_BRIDGE_DB_PATH");
+	const telegramInfo = bridges.find((b) => b.name === "telegram");
+
+	function applyBridge(next: BridgeInfo): void {
+		setBridges((prev) => {
+			const idx = prev.findIndex((b) => b.name === next.name);
+			if (idx === -1) return [...prev, next];
+			const out = prev.slice();
+			out[idx] = next;
+			return out;
+		});
+	}
+
+	return (
+		<div className="mx-auto max-w-5xl space-y-4">
+			<div>
+				<h1 className="text-xl font-semibold tracking-tight">Messaging bridges</h1>
+				<p className="mt-1 max-w-3xl text-sm text-ink-3">
+					Save credentials, then start the bridge. The deck supervises the process; saving a
+					token alone does not bring the integration online.
+				</p>
+			</div>
+
+			{error ? (
+				<div className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 font-mono text-xs text-danger">
+					{error}
+				</div>
+			) : null}
+			{loading ? <div className="text-sm text-ink-3">Loading...</div> : null}
+
+			<BridgeCard
+				title="Telegram"
+				description="DM-only long-poll bridge to local omp-deck."
+				info={telegramInfo}
+				credentialRows={[
+					{ label: "Bot token", entry: telegramToken },
+					{ label: "Allowed users", entry: telegramAllowed },
+					{ label: "Mapping DB path", entry: telegramDb },
+				]}
+				onEdit={setEditing}
+				onApplyBridge={applyBridge}
+				onError={setError}
+			/>
+
+			<div className="rounded-md border border-dashed border-line bg-paper-2 p-4">
+				<div className="meta">Slack</div>
+				<p className="mt-1 text-sm text-ink-3">
+					Reserved for the same pattern: product-level setup here, shared managed-env storage underneath.
+				</p>
+			</div>
+
+			<EditEnvModal
+				entry={editing}
+				onClose={() => setEditing(null)}
+				onSaved={(next) => {
+					setData(next);
+					setEditing(null);
+					void refresh();
+				}}
+			/>
+		</div>
+	);
+}
+
+function BridgeCard({
+	title,
+	description,
+	info,
+	credentialRows,
+	onEdit,
+	onApplyBridge,
+	onError,
+}: {
+	title: string;
+	description: string;
+	info: BridgeInfo | undefined;
+	credentialRows: Array<{ label: string; entry: EnvEntry | undefined }>;
+	onEdit: (entry: EnvEntry) => void;
+	onApplyBridge: (next: BridgeInfo) => void;
+	onError: (message: string | undefined) => void;
+}) {
+	const [busy, setBusy] = useState<"start" | "stop" | "restart" | undefined>();
+
+	async function run(action: "start" | "stop" | "restart", name: BridgeName): Promise<void> {
+		setBusy(action);
+		onError(undefined);
+		try {
+			const next = await bridgesApi[action](name);
+			onApplyBridge(next);
+		} catch (e) {
+			onError(String((e as Error).message ?? e));
+		} finally {
+			setBusy(undefined);
+		}
+	}
+
+	const status = info?.status ?? "stopped";
+	const missing = info?.missingEnv ?? [];
+	const canStart = status !== "running" && status !== "starting" && missing.length === 0;
+	const canStop = status === "running" || status === "starting";
+	const canRestart = status === "running";
+
+	return (
+		<div className="overflow-hidden rounded-md border border-line bg-paper">
+			<div className="flex items-center justify-between gap-3 border-b border-line bg-paper-2 px-3 py-2">
+				<div>
+					<div className="meta">{title}</div>
+					<div className="mt-0.5 text-xs text-ink-3">{description}</div>
+				</div>
+				<div className="flex items-center gap-2">
+					<Badge tone={bridgeStatusTone(status)}>{bridgeStatusLabel(status, info)}</Badge>
+				</div>
+			</div>
+			<div className="space-y-3 p-3">
+				{missing.length > 0 ? (
+					<div className="rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">
+						Missing required env: <span className="font-mono">{missing.join(", ")}</span>. Set
+						these below before starting the bridge.
+					</div>
+				) : null}
+				{info?.lastError ? (
+					<div className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 font-mono text-xs text-danger">
+						{info.lastError}
+					</div>
+				) : null}
+				<div className="flex flex-wrap items-center gap-2">
+					<Button
+						variant="primary"
+						size="sm"
+						disabled={!canStart || busy !== undefined}
+						onClick={() => info && void run("start", info.name)}
+					>
+						<Play className="h-3.5 w-3.5" />
+						{busy === "start" ? "Starting..." : "Start"}
+					</Button>
+					<Button
+						variant="outline"
+						size="sm"
+						disabled={!canStop || busy !== undefined}
+						onClick={() => info && void run("stop", info.name)}
+					>
+						<Square className="h-3.5 w-3.5" />
+						{busy === "stop" ? "Stopping..." : "Stop"}
+					</Button>
+					<Button
+						variant="outline"
+						size="sm"
+						disabled={!canRestart || busy !== undefined}
+						onClick={() => info && void run("restart", info.name)}
+					>
+						<RotateCcw className="h-3.5 w-3.5" />
+						{busy === "restart" ? "Restarting..." : "Restart"}
+					</Button>
+					{info ? <BridgeMeta info={info} /> : null}
+				</div>
+				<div className="divide-y divide-line rounded-md border border-line">
+					{credentialRows.map((row) => (
+						<MessagingCredentialRow key={row.label} label={row.label} entry={row.entry} onEdit={onEdit} />
+					))}
+				</div>
+				{info ? <BridgeLogsPanel name={info.name} /> : null}
+			</div>
+		</div>
+	);
+}
+
+function BridgeMeta({ info }: { info: BridgeInfo }) {
+	const parts: string[] = [];
+	if (info.status === "running") {
+		if (info.pid !== undefined) parts.push(`pid ${info.pid}`);
+		if (info.startedAt) parts.push(`up ${formatUptime(info.startedAt)}`);
+	} else if (info.exitCode !== undefined) {
+		parts.push(`exit ${info.exitCode}`);
+	}
+	if (info.crashCount > 0) parts.push(`crashes ${info.crashCount}`);
+	if (parts.length === 0) return null;
+	return <div className="font-mono text-2xs text-ink-3">{parts.join(" · ")}</div>;
+}
+
+function BridgeLogsPanel({ name }: { name: BridgeName }) {
+	const [open, setOpen] = useState(false);
+	const [lines, setLines] = useState<Array<{ stream: string; text: string; timestamp: string }>>([]);
+	const [fetching, setFetching] = useState(false);
+
+	async function load(): Promise<void> {
+		setFetching(true);
+		try {
+			const resp = await bridgesApi.logs(name);
+			setLines(resp.lines);
+		} catch (e) {
+			setLines([{ stream: "stderr", text: String(e), timestamp: new Date().toISOString() }]);
+		} finally {
+			setFetching(false);
+		}
+	}
+
+	useEffect(() => {
+		if (!open) return;
+		void load();
+		const id = window.setInterval(() => {
+			if (document.visibilityState === "visible") void load();
+		}, 2500);
+		return () => window.clearInterval(id);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [open, name]);
+
+	return (
+		<div className="rounded-md border border-line bg-paper-2">
+			<button
+				type="button"
+				className="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-ink-2 hover:bg-paper-3"
+				onClick={() => setOpen((v) => !v)}
+			>
+				<span>Bridge logs</span>
+				<span className="font-mono text-2xs text-ink-3">{open ? "hide" : "show"}</span>
+			</button>
+			{open ? (
+				<div className="max-h-64 overflow-auto border-t border-line bg-paper p-2 font-mono text-2xs">
+					{fetching && lines.length === 0 ? <div className="text-ink-3">Loading...</div> : null}
+					{!fetching && lines.length === 0 ? <div className="text-ink-3">No log lines yet.</div> : null}
+					{lines.map((line, idx) => (
+						<div
+							key={`${line.timestamp}-${idx}`}
+							className={cn("whitespace-pre-wrap", line.stream === "stderr" ? "text-danger" : "text-ink-2")}
+						>
+							{line.text}
+						</div>
+					))}
+				</div>
+			) : null}
+		</div>
+	);
+}
+
+function MessagingCredentialRow({
+	label,
+	entry,
+	onEdit,
+}: {
+	label: string;
+	entry: EnvEntry | undefined;
+	onEdit: (entry: EnvEntry) => void;
+}) {
+	return (
+		<div className="grid grid-cols-[160px_1fr_120px] items-center gap-3 px-3 py-2 text-sm">
+			<div>
+				<div className="font-medium text-ink">{label}</div>
+				<div className="font-mono text-2xs text-ink-4">{entry?.key ?? "missing schema"}</div>
+			</div>
+			<div className="min-w-0">
+				<div className="truncate font-mono text-xs text-ink-2">{entry?.masked ?? "unavailable"}</div>
+				<div className="mt-0.5 flex flex-wrap gap-1">
+					{entry ? <Badge tone={sourceTone(entry.source)}>{sourceLabel(entry.source)}</Badge> : null}
+					{entry ? envApplyBadge(entry) : null}
+				</div>
+			</div>
+			<div className="flex justify-end">
+				<Button variant="outline" size="sm" disabled={!entry} onClick={() => entry && onEdit(entry)}>
+					Replace
+				</Button>
+			</div>
+		</div>
+	);
+}
+
+function EnvTable({
+	title,
+	entries,
+	onEdit,
+}: {
+	title: string;
+	entries: EnvEntry[];
+	onEdit: (entry: EnvEntry) => void;
+}) {
+	return (
+		<div className="overflow-hidden rounded-md border border-line bg-paper">
+			<div className="border-b border-line bg-paper-2 px-3 py-2">
+				<div className="meta">{title}</div>
+			</div>
+			<div className="divide-y divide-line">
+				{entries.map((entry) => (
+					<div key={entry.key} className="grid grid-cols-[220px_1fr_120px_100px] gap-3 px-3 py-2 text-sm">
+						<div className="min-w-0">
+							<div className="truncate font-mono text-xs font-medium text-ink">{entry.key}</div>
+							<div className="mt-0.5 text-xs text-ink-4">{entry.valueType}</div>
+						</div>
+						<div className="min-w-0">
+							<div className="truncate font-mono text-xs text-ink-2">{entry.masked}</div>
+							<div className="mt-0.5 truncate text-xs text-ink-3">{entry.description}</div>
+						</div>
+						<div className="flex flex-col items-start gap-1">
+							<Badge tone={sourceTone(entry.source)}>{sourceLabel(entry.source)}</Badge>
+							{envApplyBadge(entry)}
+						</div>
+						<div className="flex justify-end">
+							<Button variant="outline" size="sm" onClick={() => onEdit(entry)}>
+								Replace
+							</Button>
+						</div>
+					</div>
+				))}
+			</div>
+		</div>
+	);
+}
+
+function EditEnvModal({
+	entry,
+	onClose,
+	onSaved,
+}: {
+	entry: EnvEntry | null;
+	onClose: () => void;
+	onSaved: (next: ListEnvSettingsResponse) => void;
+}) {
+	const [value, setValue] = useState("");
+	const [saving, setSaving] = useState(false);
+	const [error, setError] = useState<string | undefined>();
+
+	useEffect(() => {
+		if (!entry) return;
+		setValue(entry.sensitive ? "" : entry.source === "unset" ? "" : entry.masked);
+		setError(undefined);
+	}, [entry]);
+
+	if (!entry) return null;
+
+	async function save(nextValue: string | null): Promise<void> {
+		if (!entry) return;
+		setSaving(true);
+		try {
+			const next = await settingsApi.patchEnv({ [entry.key]: nextValue });
+			onSaved(next);
+		} catch (e) {
+			setError(String(e));
+		} finally {
+			setSaving(false);
+		}
+	}
+
+	return (
+		<Modal open={Boolean(entry)} onClose={onClose} widthClass="max-w-xl">
+			<div className="flex h-11 items-center gap-2 border-b border-line px-3">
+				<div className="min-w-0 flex-1">
+					<div className="truncate font-mono text-xs font-semibold text-ink">{entry.key}</div>
+					<div className="text-xs text-ink-3">Writes to managed .env only</div>
+				</div>
+				<Button variant="ghost" size="icon" onClick={onClose} aria-label="Close">
+					<X className="h-4 w-4" />
+				</Button>
+			</div>
+			<div className="space-y-3 overflow-auto p-4">
+				<div className="flex flex-wrap gap-1.5">
+					<Badge tone={sourceTone(entry.source)}>{sourceLabel(entry.source)}</Badge>
+					{entry.sensitive ? <Badge tone="danger">secret</Badge> : null}
+					{entry.restartRequired ? <Badge tone="warn">restart required</Badge> : <Badge tone="success">hot apply</Badge>}
+				</div>
+				<p className="text-sm text-ink-3">{entry.description}</p>
+				{entry.source === "process-env" ? (
+					<div className="rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">
+						This key is currently supplied by the launching process. Replacing it here writes the
+						managed env file, but process env remains higher priority until removed upstream.
+					</div>
+				) : null}
+				<label className="block">
+					<div className="meta mb-1">New value</div>
+					<input
+						className="field h-9 w-full px-2 font-mono text-sm"
+						type={entry.sensitive ? "password" : "text"}
+						value={value}
+						onChange={(e) => setValue(e.target.value)}
+						placeholder={entry.sensitive ? "Paste replacement value" : entry.defaultValue ?? "Unset"}
+					/>
+				</label>
+				{entry.options ? (
+					<div className="text-xs text-ink-3">Allowed: {entry.options.join(", ")}</div>
+				) : null}
+				{error ? (
+					<div className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 font-mono text-xs text-danger">
+						{error}
+					</div>
+				) : null}
+			</div>
+			<div className="flex items-center justify-between gap-2 border-t border-line px-3 py-3">
+				<Button variant="danger" size="sm" disabled={saving} onClick={() => void save(null)}>
+					Unset
+				</Button>
+				<div className="flex gap-2">
+					<Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>
+						Cancel
+					</Button>
+					<Button variant="primary" size="sm" onClick={() => void save(value)} disabled={saving}>
+						<Save className="h-3.5 w-3.5" />
+						Save
+					</Button>
+				</div>
+			</div>
+		</Modal>
+	);
+}
+
+function AppearanceSection() {
+	const theme = useTheme();
+	return (
+		<div className="mx-auto max-w-5xl space-y-4">
+			<div>
+				<h1 className="text-xl font-semibold tracking-tight">Appearance</h1>
+				<p className="mt-1 max-w-3xl text-sm text-ink-3">
+					Themes swap the entire palette and font stack at runtime. Your choice is stored in this
+					browser; clearing it falls back to the system color preference.
+				</p>
+			</div>
+
+			<div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+				{THEMES.map((def) => (
+					<ThemeCard
+						key={def.id}
+						definition={def}
+						isActive={theme.active === def.id}
+						isPinned={theme.stored === def.id}
+						onPick={() => theme.set(def.id)}
+					/>
+				))}
+			</div>
+
+			<div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line bg-paper-2 px-3 py-2 text-sm">
+				<div className="min-w-0">
+					<div className="meta">System preference</div>
+					<div className="mt-0.5 text-xs text-ink-3">
+						{theme.usingSystem
+							? `Following the OS: ${theme.systemPreferred}.`
+							: `Pinned to ${theme.stored}. The OS currently prefers ${theme.systemPreferred}.`}
+					</div>
+				</div>
+				<Button
+					variant="outline"
+					size="sm"
+					disabled={theme.usingSystem}
+					onClick={() => theme.clear()}
+				>
+					Match system
+				</Button>
+			</div>
+
+			<div className="overflow-hidden rounded-md border border-line bg-paper">
+				<div className="border-b border-line bg-paper-2 px-3 py-2">
+					<div className="meta">Font preview</div>
+					<div className="mt-0.5 text-xs text-ink-3">Driven by the active theme. v1 ships one font set.</div>
+				</div>
+				<div className="space-y-3 p-4">
+					<div>
+						<div className="meta mb-1">Sans</div>
+						<div className="font-sans text-base text-ink">
+							The agent finished compaction and routed the next prompt back to the original session.
+						</div>
+					</div>
+					<div>
+						<div className="meta mb-1">Mono</div>
+						<div className="rounded-md border border-line bg-paper-code px-3 py-2 font-mono text-xs text-ink-2">
+							{"const status = await bridgesApi.start(\"telegram\");"}
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	);
+}
+
+function ThemeCard({
+	definition,
+	isActive,
+	isPinned,
+	onPick,
+}: {
+	definition: (typeof THEMES)[number];
+	isActive: boolean;
+	isPinned: boolean;
+	onPick: () => void;
+}) {
+	return (
+		<button
+			type="button"
+			onClick={onPick}
+			data-theme-preview={definition.id}
+			aria-pressed={isActive}
+			className={cn(
+				"group flex flex-col gap-3 rounded-md border bg-paper p-3 text-left transition-colors",
+				isActive ? "border-accent ring-1 ring-accent/40" : "border-line hover:border-ink/30",
+			)}
+		>
+			<div className="flex items-center justify-between gap-2">
+				<div>
+					<div className="text-sm font-semibold text-ink">{definition.label}</div>
+					<div className="mt-0.5 text-xs text-ink-3">{definition.description}</div>
+				</div>
+				<div className="flex shrink-0 flex-col items-end gap-1">
+					{isActive ? <Badge tone="accent">active</Badge> : null}
+					{!isActive && isPinned ? <Badge tone="muted">pinned</Badge> : null}
+				</div>
+			</div>
+			<ThemeSwatchStrip definition={definition} />
+		</button>
+	);
+}
+
+function ThemeSwatchStrip({ definition }: { definition: (typeof THEMES)[number] }) {
+	// Render swatches inside an isolated `data-theme="..."` wrapper so each card
+	// shows its OWN palette regardless of which theme the rest of the UI uses.
+	return (
+		<div
+			data-theme={definition.id}
+			className="grid grid-cols-4 gap-1.5 rounded-md border border-line/60 bg-paper p-1.5"
+		>
+			{definition.swatchTokens.map((s) => (
+				<div key={s.token} className="flex flex-col items-stretch gap-1">
+					<div
+						className="h-8 w-full rounded"
+						style={{ backgroundColor: `rgb(var(--${s.token}))` }}
+					/>
+					<div className="text-center font-mono text-2xs uppercase tracking-meta text-ink-3">
+						{s.label}
+					</div>
+				</div>
+			))}
+		</div>
+	);
+}
+
+function StubSection({ section }: { section: Exclude<SectionId, "env" | "messaging" | "appearance"> }) {
+	const spec = SECTIONS.find((s) => s.id === section)!;
+	return (
+		<div className="mx-auto max-w-3xl rounded-md border border-dashed border-line bg-paper-2 p-6">
+			<div className="meta">{spec.label}</div>
+			<h1 className="mt-2 text-xl font-semibold">Not built yet</h1>
+			<p className="mt-1 text-sm text-ink-3">This section is reserved so the settings layout is stable.</p>
+		</div>
+	);
+}
+
+function SettingsSideRail() {
+	return <div className="p-3 text-xs text-ink-3">Settings</div>;
+}
+
+function SettingsInspector() {
+	return (
+		<div className="space-y-2 p-3 text-xs text-ink-3">
+			<div className="meta">Settings notes</div>
+			<p>Secrets are masked in list responses. Replace values here; do not reveal unless using the loopback API directly.</p>
+		</div>
+	);
+}
+
+function normalizeSection(raw: string | null): SectionId {
+	return SECTIONS.some((s) => s.id === raw) ? (raw as SectionId) : "env";
+}
+
+function sourceLabel(source: EnvEntry["source"]): string {
+	if (source === "process-env") return "process env";
+	if (source === "env-file") return ".env file";
+	return source;
+}
+
+function sourceTone(source: EnvEntry["source"]): "accent" | "default" | "muted" {
+	if (source === "process-env") return "accent";
+	if (source === "env-file") return "default";
+	return "muted";
+}
+
+function envApplyBadge(entry: EnvEntry) {
+	if (entry.hotApply) return <Badge tone="success">hot</Badge>;
+	if (entry.restartTarget === "telegram-bridge") return <Badge tone="warn">bridge restart</Badge>;
+	if (entry.restartRequired) return <Badge tone="warn">server restart</Badge>;
+	return <Badge tone="muted">manual</Badge>;
+}
+
+function bridgeStatusTone(status: BridgeInfo["status"]): "success" | "muted" | "warn" | "danger" {
+	if (status === "running") return "success";
+	if (status === "starting") return "warn";
+	if (status === "crashed") return "danger";
+	return "muted";
+}
+
+function bridgeStatusLabel(status: BridgeInfo["status"], info: BridgeInfo | undefined): string {
+	if (status === "running") return "running";
+	if (status === "starting") return "starting";
+	if (status === "crashed") return info?.exitSignal ? `crashed (${info.exitSignal})` : "crashed";
+	if (info && info.missingEnv.length > 0) return "missing credentials";
+	return "stopped";
+}
+
+function formatUptime(startedIso: string): string {
+	const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(startedIso)) / 1000));
+	if (seconds < 60) return `${seconds}s`;
+	const minutes = Math.floor(seconds / 60);
+	if (minutes < 60) return `${minutes}m`;
+	const hours = Math.floor(minutes / 60);
+	if (hours < 24) return `${hours}h${minutes % 60}m`;
+	const days = Math.floor(hours / 24);
+	return `${days}d${hours % 24}h`;
+}

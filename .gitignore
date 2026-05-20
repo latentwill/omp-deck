@@ -1,0 +1,37 @@
+node_modules
+dist
+.DS_Store
+.env
+.env.local
+*.log
+.bun
+.vite
+
+# Build artifacts
+apps/*/dist
+apps/web/dist-server
+.next
+
+# Editor
+.vscode
+.idea
+*.swp
+# Runtime + deck-managed data
+apps/server/data
+apps/server/data/*.db
+apps/server/data/*.db-shm
+apps/server/data/*.db-wal
+apps/server/dist-server
+apps/bridges/*/dist
+
+# Smoke / spawn helpers and captured logs
+.logs
+orgd-stdout.log
+vite.err.log
+vite.out.log
+server.err.log
+server.out.log
+
+# Local config the deck or bridges may write
+.env.*
+!.env.example

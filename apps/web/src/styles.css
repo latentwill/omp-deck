@@ -1,0 +1,274 @@
+/* Font system — IBM Plex Sans for body, IBM Plex Mono for chrome / data / code. */
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+
+/* Light-theme code highlighting baseline. Slate theme overrides token colors
+   below via `[data-theme="slate"] .hljs-…` blocks. */
+@import "highlight.js/styles/atom-one-light.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Themes ────────────────────────────────────────────────────────────────
+   Tokens are space-separated R G B triplets so Tailwind's `<alpha-value>`
+   substitution composes correctly (`bg-warn/15`, `bg-accent-soft/50`). Read
+   them through `rgb(var(--token))` in raw CSS, or via Tailwind utilities
+   anywhere else. Switching themes is `<html data-theme="slate">`. */
+:root,
+[data-theme="paper"] {
+	color-scheme: light;
+	--paper: 247 244 238;
+	--paper-2: 253 251 245;
+	--paper-3: 239 234 220;
+	--paper-code: 253 251 245;
+	--ink: 26 24 20;
+	--ink-2: 61 58 53;
+	--ink-3: 110 106 98;
+	--ink-4: 164 160 151;
+	--line: 230 224 212;
+	--line-strong: 207 200 182;
+	--accent: 154 52 18;
+	--accent-soft: 253 228 207;
+	--success: 21 128 61;
+	--warn: 180 83 9;
+	--danger: 153 27 27;
+	--thinking: 107 33 168;
+	--font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+	--font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+[data-theme="slate"] {
+	color-scheme: dark;
+	--paper: 15 19 26;
+	--paper-2: 22 27 35;
+	--paper-3: 30 36 45;
+	--paper-code: 18 22 29;
+	--ink: 232 234 237;
+	--ink-2: 184 188 196;
+	--ink-3: 138 142 150;
+	--ink-4: 92 97 105;
+	--line: 39 45 55;
+	--line-strong: 55 62 74;
+	--accent: 249 115 22;
+	--accent-soft: 64 36 18;
+	--success: 74 222 128;
+	--warn: 251 191 36;
+	--danger: 248 113 113;
+	--thinking: 192 132 252;
+	--font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+	--font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* highlight.js — keep atom-one-light as the default surface; remap the token
+   colors we care about for the slate theme so code reads cleanly on dark. */
+.hljs {
+	background: transparent !important;
+	color: rgb(var(--ink)) !important;
+	padding: 0 !important;
+}
+
+[data-theme="slate"] .hljs-comment,
+[data-theme="slate"] .hljs-quote {
+	color: rgb(var(--ink-3));
+}
+[data-theme="slate"] .hljs-keyword,
+[data-theme="slate"] .hljs-selector-tag,
+[data-theme="slate"] .hljs-literal,
+[data-theme="slate"] .hljs-section,
+[data-theme="slate"] .hljs-link {
+	color: rgb(192 132 252);
+}
+[data-theme="slate"] .hljs-string,
+[data-theme="slate"] .hljs-attr,
+[data-theme="slate"] .hljs-symbol,
+[data-theme="slate"] .hljs-bullet,
+[data-theme="slate"] .hljs-addition {
+	color: rgb(134 211 116);
+}
+[data-theme="slate"] .hljs-number,
+[data-theme="slate"] .hljs-meta,
+[data-theme="slate"] .hljs-built_in,
+[data-theme="slate"] .hljs-builtin-name,
+[data-theme="slate"] .hljs-type,
+[data-theme="slate"] .hljs-params {
+	color: rgb(209 154 102);
+}
+[data-theme="slate"] .hljs-title,
+[data-theme="slate"] .hljs-function .hljs-title,
+[data-theme="slate"] .hljs-class .hljs-title {
+	color: rgb(97 175 239);
+}
+[data-theme="slate"] .hljs-variable,
+[data-theme="slate"] .hljs-template-variable,
+[data-theme="slate"] .hljs-name,
+[data-theme="slate"] .hljs-selector-id,
+[data-theme="slate"] .hljs-selector-class,
+[data-theme="slate"] .hljs-tag {
+	color: rgb(224 108 117);
+}
+[data-theme="slate"] .hljs-deletion {
+	color: rgb(248 113 113);
+}
+
+@layer base {
+	html,
+	body,
+	#root {
+		height: 100%;
+		overflow: hidden;
+	}
+	html {
+		background-color: rgb(var(--paper));
+	}
+	body {
+		background-color: rgb(var(--paper));
+		color: rgb(var(--ink));
+		font-family: var(--font-sans);
+		font-feature-settings: "ss01", "cv11";
+		-webkit-font-smoothing: antialiased;
+		-moz-osx-font-smoothing: grayscale;
+	}
+
+	/* Scrollbars — match the active paper, hairline thumb. */
+	::-webkit-scrollbar {
+		width: 10px;
+		height: 10px;
+	}
+	::-webkit-scrollbar-thumb {
+		background-color: rgb(var(--ink) / 0.18);
+		border-radius: 999px;
+		border: 2px solid rgb(var(--paper));
+	}
+	::-webkit-scrollbar-thumb:hover {
+		background-color: rgb(var(--ink) / 0.32);
+	}
+	::-webkit-scrollbar-track {
+		background-color: transparent;
+	}
+
+	/* Selection */
+	::selection {
+		background-color: rgb(var(--accent) / 0.16);
+	}
+}
+
+@layer components {
+	/* Field — light input that doesn't shout. */
+	.field {
+		@apply bg-paper-2 border border-line text-ink placeholder:text-ink-4
+			focus:border-ink/40 focus:outline-none rounded-md;
+	}
+
+	/* Pure utility row used everywhere instead of a card. */
+	.row {
+		@apply border-b border-line py-2;
+	}
+
+	/* Meta label — small caps, monospace, dim. Used for "you" / "omp" / section names. */
+	.meta {
+		@apply font-mono text-2xs uppercase tracking-meta text-ink-3;
+	}
+
+	/* Chip — tiny status pill. Restrained, no shadow. */
+	.chip {
+		@apply inline-flex items-center gap-1 rounded font-mono text-2xs uppercase
+			tracking-meta px-1.5 py-0.5;
+	}
+
+	/* Buttons — flat, single-accent. */
+	.btn {
+		@apply inline-flex items-center justify-center gap-1.5 rounded-md font-medium
+			transition-colors focus:outline-none focus-visible:ring-1
+			focus-visible:ring-ink/30 disabled:cursor-not-allowed disabled:opacity-50;
+	}
+	.btn-primary {
+		@apply btn bg-ink text-paper-2 hover:bg-ink-2;
+	}
+	.btn-ghost {
+		@apply btn text-ink-2 hover:bg-paper-3;
+	}
+	.btn-danger {
+		@apply btn bg-danger text-paper-2 hover:bg-danger/85;
+	}
+
+	/* Markdown — sans body, mono inline code, calm blockquotes. */
+	.markdown {
+		@apply text-ink leading-relaxed text-[15px];
+	}
+	.markdown p {
+		@apply my-2;
+	}
+	.markdown ul,
+	.markdown ol {
+		@apply my-2 pl-6;
+	}
+	.markdown li {
+		@apply my-1;
+	}
+	.markdown ul {
+		@apply list-disc;
+	}
+	.markdown ol {
+		@apply list-decimal;
+	}
+	.markdown a {
+		@apply text-accent underline underline-offset-2;
+	}
+	.markdown a:hover {
+		@apply text-accent/80;
+	}
+	.markdown h1,
+	.markdown h2,
+	.markdown h3 {
+		@apply font-semibold mt-3 mb-1.5;
+	}
+	.markdown h1 {
+		@apply text-lg;
+	}
+	.markdown h2 {
+		@apply text-base;
+	}
+	.markdown h3 {
+		@apply text-sm;
+	}
+	.markdown code:not(pre code) {
+		@apply font-mono text-[0.86em] bg-paper-3 text-ink px-1 py-0.5 rounded;
+	}
+	.markdown pre {
+		@apply font-mono text-xs bg-paper-code border-y border-line
+			my-3 px-4 py-3 overflow-x-auto leading-relaxed;
+	}
+	.markdown blockquote {
+		@apply border-l-2 border-line-strong pl-3 italic text-ink-2 my-2;
+	}
+	.markdown table {
+		@apply my-2 w-full border-collapse;
+	}
+	.markdown th,
+	.markdown td {
+		@apply border border-line px-2 py-1 text-left;
+	}
+	.markdown th {
+		@apply bg-paper-3 font-medium;
+	}
+}
+
+/* Streaming caret — subtle, monospace block to feel terminal-adjacent. */
+.cursor-blink::after {
+	content: "▍";
+	display: inline-block;
+	color: rgb(var(--accent));
+	animation: blink 1s steps(2, start) infinite;
+	margin-left: 0.05em;
+	font-weight: 400;
+}
+@keyframes blink {
+	to {
+		visibility: hidden;
+	}
+}

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+		<meta name="theme-color" content="#f7f4ee" />
+		<title>omp-deck</title>
+		<script>
+			// Apply the theme BEFORE React mounts so there is no flash of the
+			// wrong palette. Kept tiny on purpose; mirrored by `apps/web/src/lib/theme.ts`.
+			(function () {
+				var THEMES = ["paper", "slate"];
+				var stored = null;
+				try {
+					stored = localStorage.getItem("omp-deck:theme");
+				} catch (_) {}
+				var theme;
+				if (stored && THEMES.indexOf(stored) !== -1) {
+					theme = stored;
+				} else if (
+					window.matchMedia &&
+					window.matchMedia("(prefers-color-scheme: dark)").matches
+				) {
+					theme = "slate";
+				} else {
+					theme = "paper";
+				}
+				document.documentElement.setAttribute("data-theme", theme);
+				var meta = document.querySelector('meta[name="theme-color"]');
+				if (meta) meta.setAttribute("content", theme === "slate" ? "#0f131a" : "#f7f4ee");
+				var scheme = document.querySelector('meta[name="color-scheme"]');
+				if (!scheme) {
+					scheme = document.createElement("meta");
+					scheme.setAttribute("name", "color-scheme");
+					document.head.appendChild(scheme);
+				}
+				scheme.setAttribute("content", theme === "slate" ? "dark" : "light");
+			})();
+		</script>
+	</head>
+	<body class="bg-paper text-ink antialiased">
+		<div id="root"></div>
+		<script type="module" src="/src/main.tsx"></script>
+	</body>
+</html>

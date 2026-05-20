@@ -1,0 +1,116 @@
+import { useState } from "react";
+import { useDroppable } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { Plus } from "lucide-react";
+import type { Task, TaskState } from "@omp-deck/protocol";
+import { cn } from "@/lib/utils";
+import { TaskCard } from "./TaskCard";
+
+interface Props {
+	state: TaskState;
+	tasks: Task[];
+	onCreate: (stateId: string, title: string) => void;
+	onOpen: (task: Task) => void;
+	onRenameRequest?: (state: TaskState) => void;
+}
+
+export function Column({ state, tasks, onCreate, onOpen, onRenameRequest }: Props) {
+	const { setNodeRef, isOver } = useDroppable({ id: state.id, data: { stateId: state.id } });
+
+	const [composing, setComposing] = useState(false);
+	const [draft, setDraft] = useState("");
+
+	function submit(): void {
+		const t = draft.trim();
+		if (!t) {
+			setComposing(false);
+			return;
+		}
+		onCreate(state.id, t);
+		setDraft("");
+		setComposing(false);
+	}
+
+	return (
+		<div
+			ref={setNodeRef}
+			className={cn(
+				"flex w-72 shrink-0 flex-col border-r border-line bg-paper transition-colors",
+				isOver && "bg-accent-soft/40 ring-1 ring-inset ring-accent/40",
+			)}
+		>
+			<div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-line bg-paper px-3 py-2">
+				<div className="flex items-center gap-2 min-w-0">
+					<span
+						className="h-2 w-2 shrink-0 rounded-full"
+						style={{ backgroundColor: state.color }}
+						aria-hidden="true"
+					/>
+					<button
+						type="button"
+						onClick={() => onRenameRequest?.(state)}
+						className="font-mono text-2xs uppercase tracking-meta text-ink-2 hover:text-ink"
+						title="Edit column"
+					>
+						{state.name}
+					</button>
+					<span className="font-mono text-2xs text-ink-4">{tasks.length}</span>
+				</div>
+				<button
+					type="button"
+					onClick={() => setComposing(true)}
+					className="text-ink-3 hover:text-ink"
+					aria-label="Add task"
+					title="Add task"
+				>
+					<Plus className="h-4 w-4" />
+				</button>
+			</div>
+
+			<div className="flex-1 overflow-y-auto px-2 py-2">
+				<SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+					<div className="flex flex-col gap-1.5">
+						{tasks.map((t) => (
+							<TaskCard key={t.id} task={t} onOpen={onOpen} />
+						))}
+					</div>
+				</SortableContext>
+
+				{composing ? (
+					<div className="mt-2 border border-line bg-paper-2 p-2">
+						<textarea
+							autoFocus
+							rows={2}
+							value={draft}
+							onChange={(e) => setDraft(e.target.value)}
+							onKeyDown={(e) => {
+								if (e.key === "Enter" && !e.shiftKey) {
+									e.preventDefault();
+									submit();
+								}
+								if (e.key === "Escape") {
+									setDraft("");
+									setComposing(false);
+								}
+							}}
+							placeholder="Task title — enter to add"
+							className="w-full resize-none bg-transparent text-sm placeholder:text-ink-4 focus:outline-none"
+						/>
+						<div className="mt-1 flex justify-between font-mono text-2xs text-ink-4">
+							<span>esc cancel</span>
+							<span>enter to add</span>
+						</div>
+					</div>
+				) : (
+					<button
+						type="button"
+						onClick={() => setComposing(true)}
+						className="mt-2 w-full px-2 py-1.5 text-left font-mono text-2xs text-ink-4 hover:text-ink"
+					>
+						+ add task
+					</button>
+				)}
+			</div>
+		</div>
+	);
+}
