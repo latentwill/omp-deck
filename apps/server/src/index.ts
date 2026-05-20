@@ -19,6 +19,7 @@ import { WsHub, type ConnectionData } from "./ws.ts";
 import { MarketplaceService } from "./marketplace-service.ts";
 import { SkillsService } from "./skills-service.ts";
 import { startSkillsWatcher } from "./skills-watcher.ts";
+import { installStarterSkills } from "./starter-skills.ts";
 import { buildDefaultBridgeSupervisor } from "./bridge-supervisor.ts";
 import type { RestartServerResponse } from "@omp-deck/protocol";
 
@@ -35,6 +36,11 @@ async function main(): Promise<void> {
 	});
 
 	openDb({ path: config.dbPath });
+	// Sync bundled starter skills into ~/.omp/agent/skills/ before the watcher
+	// spins up. Idempotent — never overwrites a user-edited target — so this
+	// is safe on every boot. Disable with OMP_DECK_INSTALL_STARTER_SKILLS=0.
+	await installStarterSkills();
+
 
 	const bridge = new InProcessAgentBridge({
 		idleTimeoutMs: config.idleTimeoutMs,
