@@ -1,4 +1,4 @@
-import { memo, type HTMLAttributes, type ReactNode } from "react";
+import { memo, type AnchorHTMLAttributes, type HTMLAttributes, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -17,7 +17,7 @@ export const Markdown = memo(function Markdown({ children, className, streaming 
 			<ReactMarkdown
 				remarkPlugins={[remarkGfm]}
 				rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
-				components={{ pre: CopyablePre }}
+				components={{ pre: CopyablePre, a: ExternalAnchor }}
 			>
 				{children}
 			</ReactMarkdown>
@@ -40,5 +40,24 @@ function CopyablePre({ children, ...rest }: HTMLAttributes<HTMLPreElement> & { c
 			<pre {...rest}>{children}</pre>
 			<CopyButton />
 		</div>
+	);
+}
+
+/**
+ * Open external URLs in a new tab so clicking a link inside chat / inspector
+ * markdown doesn't blow away the deck session. In-app links (relative paths,
+ * anchors, custom schemes the surrounding view handles) fall through with
+ * default behavior.
+ */
+function ExternalAnchor({ href, children, ...rest }: AnchorHTMLAttributes<HTMLAnchorElement>) {
+	const external = typeof href === "string" && /^(https?:|mailto:)/i.test(href);
+	return (
+		<a
+			{...rest}
+			href={href}
+			{...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+		>
+			{children}
+		</a>
 	);
 }

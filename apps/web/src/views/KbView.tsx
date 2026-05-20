@@ -1135,6 +1135,10 @@ const KbMarkdown = memo(function KbMarkdown({
 		({ href, children, ...rest }: WikiAnchorProps) => {
 			const isKbLink = href?.startsWith("kb-link:") ?? false;
 			const isUnresolved = href?.startsWith("kb-unresolved:") ?? false;
+			// Everything that isn't an in-app wikilink and points at an outside
+			// URL should open in a new tab so reading the kb isn't disrupted.
+			const isExternal =
+				!isKbLink && !isUnresolved && href != null && /^(https?:|mailto:)/i.test(href);
 			const cls = isKbLink
 				? "text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent"
 				: isUnresolved
@@ -1146,8 +1150,11 @@ const KbMarkdown = memo(function KbMarkdown({
 					if (onWikilink(href)) e.preventDefault();
 				}
 			};
+			const externalProps = isExternal
+				? { target: "_blank", rel: "noopener noreferrer" }
+				: {};
 			return (
-				<a {...rest} href={href} onClick={onClick} className={cls}>
+				<a {...rest} {...externalProps} href={href} onClick={onClick} className={cls}>
 					{children}
 				</a>
 			);
