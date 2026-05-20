@@ -1,9 +1,11 @@
 /**
- * /api/skills — skill-level enumeration over installed marketplace plugins.
+ * /api/skills — skill enumeration across every omp provider.
  *
- * Phase 1 of the Skills Cockpit (docs/proposals/skills-cockpit.md). This route
- * only lists; install / uninstall / enable / disable continue to flow through
- * /api/marketplace. The skill detail endpoint lands in Phase 1.2 (T-28).
+ * - `GET /api/skills?cwd=<abs>` lists every skill `loadCapability(skillCapability.id)`
+ *   returns, native-first.
+ * - `GET /api/skills/:id?cwd=<abs>` returns one skill's body + co-located files.
+ *   `id` is the server-issued opaque identifier carried on every list row;
+ *   clients never construct it from parts.
  */
 
 import { Hono } from "hono";
@@ -17,8 +19,9 @@ export function buildSkillsRouter(service: SkillsService): Hono {
 	const app = new Hono();
 
 	app.get("/skills", async (c) => {
+		const cwd = c.req.query("cwd");
 		try {
-			const body = await service.listSkills();
+			const body = await service.listSkills(cwd);
 			return c.json(body);
 		} catch (err) {
 			log.error(`listSkills failed`, err);
@@ -26,17 +29,12 @@ export function buildSkillsRouter(service: SkillsService): Hono {
 		}
 	});
 
-	app.get("/skills/:pluginId/:skillName", async (c) => {
-		// Hono auto-decodes percent-escaped path params, so a request to
-		// `/api/skills/skill-creator%40claude-plugins-official/skill-creator`
-		// arrives here as the raw `name@marketplace` and bare skill dir name.
-		const pluginId = c.req.param("pluginId");
-		const skillName = c.req.param("skillName");
-		if (!pluginId || !skillName) {
-			return c.json({ error: "pluginId and skillName are required" }, 400);
-		}
+	app.get("/skills/:id", async (c) => {
+		const id = c.req.param("id");
+		const cwd = c.req.query("cwd");
+		if (!id) return c.json({ error: "id is required" }, 400);
 		try {
-			const detail = await service.getSkillDetail(pluginId, skillName);
+			const detail = await service.getSkillDetail(id, cwd);
 			if (!detail) return c.json({ error: "skill not found" }, 404);
 			return c.json(detail);
 		} catch (err) {

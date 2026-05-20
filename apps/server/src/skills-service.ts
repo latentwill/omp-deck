@@ -1,231 +1,271 @@
 /**
- * Skill-level enumeration over the marketplace-installed plugin tree.
+ * Skill-level enumeration across every omp provider.
  *
- * Each installed plugin can contain N skills under `<installPath>/skills/<dirName>/SKILL.md`.
- * `MarketplaceManager` only surfaces capability *flags* at the plugin level, so the
- * deck cockpit needs its own walker. This service is read-only; lifecycle mutations
- * (install / uninstall / enable / disable) stay on `MarketplaceService`.
+ * Built on top of the SDK's capability system: `loadCapability(skillCapability.id, { cwd })`
+ * returns the union of skills from every registered provider (`native`,
+ * `claude-plugins`, `claude`, `codex`, `opencode`, ...) each tagged with
+ * `_source.provider`, `_source.providerName`, and `level`.
  *
- * Watcher concerns (broadcasting `skills_changed`) live in `index.ts` next to the
- * other server-level fan-out so the singleton wiring stays in one place.
+ * The marketplace-only T-27 implementation has been replaced. The deck stays
+ * omp-native: it shows what omp loads, with `native` (the user's own
+ * `~/.omp/agent/skills/`) sorted first. Marketplace plugins are one source
+ * among many.
+ *
+ * Watcher fan-out (broadcasting `skills_changed`) lives in `skills-watcher.ts`
+ * next to the other server-level wiring.
  */
 
 import { readdir, readFile, stat } from "node:fs/promises";
 import * as path from "node:path";
 
+import { loadCapability } from "@oh-my-pi/pi-coding-agent/capability";
+import { skillCapability, type Skill as SdkSkill } from "@oh-my-pi/pi-coding-agent/capability/skill";
+
 import type {
-	InstalledPluginInfo,
 	ListSkillsResponse,
 	SkillDetailResponse,
 	SkillFile,
 	SkillFrontmatter,
+	SkillProvider,
 	SkillSummary,
 } from "@omp-deck/protocol";
 
+import type { Config } from "./config.ts";
 import { logger } from "./log.ts";
 import type { MarketplaceService } from "./marketplace-service.ts";
 
 const log = logger("skills");
 
-export class SkillsService {
-	constructor(private readonly marketplace: MarketplaceService) {}
-
-	async listSkills(): Promise<ListSkillsResponse> {
-		const plugins = await this.marketplace.listInstalled();
-		const skills: SkillSummary[] = [];
-
-		for (const plugin of plugins) {
-			const entries = await this.readSkillDirs(plugin.installPath);
-			for (const dirName of entries) {
-				const skillMdPath = path.join(plugin.installPath, "skills", dirName, "SKILL.md");
-				let raw: string;
-				try {
-					raw = await readFile(skillMdPath, "utf8");
-				} catch (err) {
-					// Plugin directory layouts vary — only emit a debug log when a `skills/<x>`
-					// dir exists without a SKILL.md, since that's the only "unexpected" case.
-					log.debug(`no SKILL.md at ${skillMdPath}`, err);
-					continue;
-				}
-				skills.push({
-					id: `${plugin.id}/${dirName}`,
-					pluginId: plugin.id,
-					pluginName: plugin.name,
-					marketplace: plugin.marketplace,
-					scope: plugin.scope,
-					skillPath: skillMdPath,
-					dirName,
-					frontmatter: parseSkillFrontmatter(raw, dirName),
-					// Treat `enabled: undefined` as enabled — matches the SDK convention where
-					// the registry only writes the field when explicitly disabled.
-					enabled: plugin.enabled !== false,
-				});
-			}
-		}
-
-		// Stable ordering: by plugin id, then by skill dir name. Keeps the UI
-		// list deterministic across reads without forcing the client to sort.
-		skills.sort((a, b) => a.pluginId.localeCompare(b.pluginId) || a.dirName.localeCompare(b.dirName));
-
-		return { skills, plugins };
-	}
-
-	/**
-	 * Detail for a single skill: SKILL.md body (frontmatter stripped) + the
-	 * tree of co-located files under the skill directory. Returns `undefined`
-	 * when the plugin isn't installed, the skill dir doesn't exist, or its
-	 * SKILL.md is missing. Symlinks and noisy build/vcs dirs are filtered.
-	 */
-	async getSkillDetail(pluginId: string, dirName: string): Promise<SkillDetailResponse | undefined> {
-		const plugins = await this.marketplace.listInstalled();
-		const plugin = plugins.find((p) => p.id === pluginId);
-		if (!plugin) return undefined;
-
-		const skillDir = path.join(plugin.installPath, "skills", dirName);
-		const skillMd = path.join(skillDir, "SKILL.md");
-		let raw: string;
-		try {
-			raw = await readFile(skillMd, "utf8");
-		} catch {
-			return undefined;
-		}
-		const frontmatter = parseSkillFrontmatter(raw, dirName);
-		const body = stripFrontmatter(raw);
-		const files = await walkSkillFiles(skillDir);
-
-		return {
-			id: `${plugin.id}/${dirName}`,
-			pluginId: plugin.id,
-			pluginName: plugin.name,
-			marketplace: plugin.marketplace,
-			scope: plugin.scope,
-			skillPath: skillMd,
-			dirName,
-			frontmatter,
-			enabled: plugin.enabled !== false,
-			body,
-			files,
-		};
-	}
-
-	/**
-	 * Return the directory names directly under `<installPath>/skills/`. Missing
-	 * dir is treated as "this plugin ships no skills" — common for LSP / hook /
-	 * MCP-only plugins. Other read errors are logged at warn and treated as empty
-	 * so a single broken plugin doesn't black-hole the whole catalog.
-	 */
-	private async readSkillDirs(installPath: string): Promise<string[]> {
-		const skillsRoot = path.join(installPath, "skills");
-		try {
-			const st = await stat(skillsRoot);
-			if (!st.isDirectory()) return [];
-		} catch {
-			return [];
-		}
-		try {
-			const entries = await readdir(skillsRoot, { withFileTypes: true });
-			return entries.filter((e) => e.isDirectory()).map((e) => e.name);
-		} catch (err) {
-			log.warn(`failed to read ${skillsRoot}`, err);
-			return [];
-		}
-	}
-}
-
 /**
- * Minimal YAML-frontmatter extractor for the five SKILL.md fields the deck
- * surfaces today. Mirrors the routes-slash-commands header-grep approach —
- * scalars + single-line inline arrays — to avoid pulling in a full YAML dep
- * for what is effectively five keys. Block-style arrays (`triggers:\n  - a`)
- * fall through as `undefined` for now; we can promote to a real parser when
- * a real SKILL.md needs it.
+ * Display labels for known providers. Falls through to `providerName` from the
+ * SDK's source metadata for anything we haven't styled — that ensures new
+ * providers show up coherently without a deck release.
  */
-function parseSkillFrontmatter(text: string, dirName: string): SkillFrontmatter {
-	const fm: SkillFrontmatter = { name: dirName };
-	if (!text.startsWith("---")) return fm;
-	const end = text.indexOf("\n---", 3);
-	if (end < 0) return fm;
-	const block = text.slice(3, end);
-
-	for (const rawLine of block.split(/\r?\n/)) {
-		const line = rawLine.trimStart();
-		if (!line || line.startsWith("#")) continue;
-		const colon = line.indexOf(":");
-		if (colon <= 0) continue;
-		const key = line.slice(0, colon).trim().toLowerCase();
-		let value = line.slice(colon + 1).trim();
-		if (!value) continue;
-		if (
-			(value.startsWith('"') && value.endsWith('"')) ||
-			(value.startsWith("'") && value.endsWith("'"))
-		) {
-			value = value.slice(1, -1);
-		}
-		switch (key) {
-			case "name":
-				fm.name = value;
-				break;
-			case "description":
-				fm.description = value;
-				break;
-			case "model":
-				fm.model = value;
-				break;
-			case "triggers": {
-				const arr = parseInlineYamlArray(value);
-				if (arr) fm.triggers = arr;
-				break;
-			}
-			case "tags": {
-				const arr = parseInlineYamlArray(value);
-				if (arr) fm.tags = arr;
-				break;
-			}
-		}
-	}
-	return fm;
-}
-
-function parseInlineYamlArray(value: string): string[] | undefined {
-	if (!value.startsWith("[") || !value.endsWith("]")) return undefined;
-	const inner = value.slice(1, -1).trim();
-	if (!inner) return [];
-	return inner
-		.split(",")
-		.map((seg) => {
-			let v = seg.trim();
-			if (
-				(v.startsWith('"') && v.endsWith('"')) ||
-				(v.startsWith("'") && v.endsWith("'"))
-			) {
-				v = v.slice(1, -1);
-			}
-			return v;
-		})
-		.filter((v) => v.length > 0);
-}
-
-// Re-export for tests / external callers without needing to import the file.
-export type {
-	SkillSummary,
-	SkillFrontmatter,
-	SkillDetailResponse,
-	SkillFile,
-	InstalledPluginInfo,
-	ListSkillsResponse,
+const PROVIDER_LABEL: Readonly<Record<string, string>> = {
+	native: "OMP",
+	"claude-plugins": "Claude Plugins",
+	claude: "Claude Code",
+	codex: "Codex",
+	opencode: "OpenCode",
+	cursor: "Cursor",
+	windsurf: "Windsurf",
+	cline: "Cline",
+	gemini: "Gemini",
+	agents: "Subagents",
+	custom: "Custom",
 };
 
 /**
+ * Provider priority for default sort. Lower wins. Unknown providers land at
+ * the end (parity with arbitrary string compare).
+ */
+const PROVIDER_PRIORITY: Readonly<Record<string, number>> = {
+	native: 0,
+	"claude-plugins": 1,
+	claude: 2,
+	codex: 3,
+	opencode: 4,
+	cursor: 5,
+	windsurf: 6,
+	cline: 7,
+	gemini: 8,
+	agents: 9,
+	custom: 10,
+};
+
+export class SkillsService {
+	constructor(
+		private readonly config: Config,
+		private readonly marketplace: MarketplaceService,
+	) {}
+
+	async listSkills(cwd?: string): Promise<ListSkillsResponse> {
+		const resolvedCwd = cwd?.trim() || this.config.defaultCwd;
+		const pluginIndex = await this.buildPluginIndex();
+
+		const result = await loadCapability<SdkSkill>(skillCapability.id, { cwd: resolvedCwd });
+
+		const skills: SkillSummary[] = [];
+		for (const item of result.items) {
+			const summary = this.toSummary(item, pluginIndex);
+			if (summary) skills.push(summary);
+		}
+
+		// Stable order: provider priority, then by displayed name, then dirName
+		// as a final tiebreaker. The UI can re-sort, but native-first is the
+		// default the omp-deck cockpit lives by.
+		skills.sort((a, b) => {
+			const pa = PROVIDER_PRIORITY[a.provider] ?? 100;
+			const pb = PROVIDER_PRIORITY[b.provider] ?? 100;
+			if (pa !== pb) return pa - pb;
+			const n = a.name.localeCompare(b.name);
+			if (n !== 0) return n;
+			return a.dirName.localeCompare(b.dirName);
+		});
+
+		if (result.warnings.length > 0) {
+			log.debug(`loadCapability warnings`, result.warnings);
+		}
+
+		return { skills };
+	}
+
+	async getSkillDetail(id: string, cwd?: string): Promise<SkillDetailResponse | undefined> {
+		const skillPath = decodeIdToPath(id);
+		if (!skillPath) return undefined;
+
+		// Always re-run the capability load so we authoritatively prove this
+		// path was discoverable. Refusing to read arbitrary disk paths is the
+		// security gate — if `loadCapability` didn't surface it, we don't
+		// serve it.
+		const list = await this.listSkills(cwd);
+		const summary = list.skills.find((s) => s.skillPath === skillPath);
+		if (!summary) return undefined;
+
+		let raw: string;
+		try {
+			raw = await readFile(skillPath, "utf8");
+		} catch {
+			return undefined;
+		}
+
+		const body = stripFrontmatter(raw);
+		const skillDir = path.dirname(skillPath);
+		const files = await walkSkillFiles(skillDir);
+
+		return { ...summary, body, files };
+	}
+
+	/**
+	 * Build a `{ installPath -> { id, name, marketplace } }` index so skills
+	 * whose source path lives under a marketplace install can be attributed
+	 * to their owning plugin. Reads through `MarketplaceService.listInstalled`
+	 * so it's one disk hit, not one per skill.
+	 */
+	private async buildPluginIndex(): Promise<PluginIndex> {
+		const installed = await this.marketplace.listInstalled();
+		const byPath = new Map<string, { id: string; name: string; marketplace: string }>();
+		for (const p of installed) {
+			byPath.set(normalize(p.installPath), {
+				id: p.id,
+				name: p.name,
+				marketplace: p.marketplace,
+			});
+		}
+		return byPath;
+	}
+
+	private toSummary(item: SdkSkill, pluginIndex: PluginIndex): SkillSummary | undefined {
+		const skillPath = item.path;
+		if (!skillPath) return undefined;
+
+		const provider = (item._source?.provider ?? "custom") as SkillProvider;
+		const providerName = item._source?.providerName ?? PROVIDER_LABEL[provider] ?? provider;
+		const providerLabel = PROVIDER_LABEL[provider] ?? providerName;
+
+		const dirName = path.basename(path.dirname(skillPath));
+		const frontmatter = normalizeFrontmatter(item.frontmatter, item.name, dirName);
+
+		const summary: SkillSummary = {
+			id: encodePathToId(skillPath),
+			name: frontmatter.name,
+			dirName,
+			provider,
+			providerLabel,
+			level: item.level,
+			skillPath,
+			frontmatter,
+			enabled: !(item.frontmatter?.hide === true),
+		};
+
+		if (provider === "claude-plugins") {
+			const owner = findPluginOwner(skillPath, pluginIndex);
+			if (owner) {
+				summary.pluginId = owner.id;
+				summary.pluginName = owner.name;
+				summary.marketplace = owner.marketplace;
+			}
+		}
+
+		return summary;
+	}
+}
+
+type PluginIndex = Map<string, { id: string; name: string; marketplace: string }>;
+
+function normalize(p: string): string {
+	// Windows paths arrive with backslashes from the SDK; canonicalize to
+	// forward slashes plus lowercase drive letter so the prefix-match below
+	// works regardless of how the path was constructed.
+	return p.replace(/\\/g, "/").replace(/^([a-z]):/i, (_, d: string) => `${d.toLowerCase()}:`);
+}
+
+function findPluginOwner(
+	skillPath: string,
+	pluginIndex: PluginIndex,
+): { id: string; name: string; marketplace: string } | undefined {
+	const candidate = normalize(skillPath);
+	for (const [installPath, owner] of pluginIndex) {
+		// Path-prefix attribution. `installPath` ends at the plugin root; any
+		// skill under it (`<installPath>/skills/<name>/SKILL.md`) belongs to
+		// that plugin. Trailing-slash insensitive.
+		const prefix = installPath.endsWith("/") ? installPath : `${installPath}/`;
+		if (candidate.startsWith(prefix)) return owner;
+	}
+	return undefined;
+}
+
+function normalizeFrontmatter(
+	raw: Record<string, unknown> | undefined,
+	skillName: string,
+	dirName: string,
+): SkillFrontmatter {
+	const out: SkillFrontmatter = {
+		name: typeof raw?.name === "string" && raw.name.trim() ? raw.name.trim() : skillName || dirName,
+	};
+	const description = raw?.description;
+	if (typeof description === "string" && description.trim()) out.description = description.trim();
+	const model = raw?.model;
+	if (typeof model === "string" && model.trim()) out.model = model.trim();
+	const triggers = raw?.triggers;
+	if (Array.isArray(triggers)) {
+		const cleaned = triggers.filter((t): t is string => typeof t === "string" && t.length > 0);
+		if (cleaned.length > 0) out.triggers = cleaned;
+	}
+	const tags = raw?.tags;
+	if (Array.isArray(tags)) {
+		const cleaned = tags.filter((t): t is string => typeof t === "string" && t.length > 0);
+		if (cleaned.length > 0) out.tags = cleaned;
+	}
+	return out;
+}
+
+/** Encode an absolute path into a URL-safe id. Reversible via decodeIdToPath. */
+function encodePathToId(p: string): string {
+	const bytes = Buffer.from(p, "utf8");
+	return bytes.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function decodeIdToPath(id: string): string | undefined {
+	try {
+		const b64 = id.replace(/-/g, "+").replace(/_/g, "/");
+		const pad = b64.length % 4 === 0 ? "" : "=".repeat(4 - (b64.length % 4));
+		return Buffer.from(b64 + pad, "base64").toString("utf8");
+	} catch {
+		return undefined;
+	}
+}
+
+/**
  * Strip a leading `---\n…\n---\n?` frontmatter block from a SKILL.md body.
- * Mirrors `parseSkillFrontmatter`'s delimiter detection so the two never
- * disagree about where the body starts.
+ * Mirrors the SDK's loader so the two never disagree about where the body
+ * starts.
  */
 function stripFrontmatter(text: string): string {
 	if (!text.startsWith("---")) return text;
 	const end = text.indexOf("\n---", 3);
 	if (end < 0) return text;
-	// Skip the closing `---` line, including a trailing newline if present.
-	let cursor = end + 4; // past "\n---"
+	let cursor = end + 4;
 	if (text[cursor] === "\r") cursor += 1;
 	if (text[cursor] === "\n") cursor += 1;
 	return text.slice(cursor);
@@ -246,12 +286,6 @@ const SKILL_WALK_EXCLUDE = new Set([
 	"build",
 ]);
 
-/**
- * Recursive walk of the skill directory, returning files + dirs (excluding
- * SKILL.md itself, symlinks, and noisy build/vcs trees). Caller stops at the
- * first error — partial trees are still useful, but consistent missing-dir
- * vs broken-permission semantics aren't worth the complexity right now.
- */
 async function walkSkillFiles(skillDir: string): Promise<SkillFile[]> {
 	const out: SkillFile[] = [];
 
@@ -279,7 +313,6 @@ async function walkSkillFiles(skillDir: string): Promise<SkillFile[]> {
 				continue;
 			}
 			if (!entry.isFile()) continue;
-			// SKILL.md is rendered separately as `body`; don't list it.
 			if (depth === 0 && entry.name === "SKILL.md") continue;
 			let st;
 			try {
@@ -301,3 +334,5 @@ async function walkSkillFiles(skillDir: string): Promise<SkillFile[]> {
 	await recurse(skillDir, "", 0);
 	return out;
 }
+
+export type { SkillSummary, SkillFrontmatter, SkillDetailResponse, SkillFile, ListSkillsResponse };

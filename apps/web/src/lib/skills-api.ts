@@ -14,16 +14,20 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 	return (await res.json()) as T;
 }
 
+function withCwd(path: string, cwd: string | undefined): string {
+	if (!cwd) return path;
+	const sep = path.includes("?") ? "&" : "?";
+	return `${path}${sep}cwd=${encodeURIComponent(cwd)}`;
+}
+
 export const skillsApi = {
-	list(): Promise<ListSkillsResponse> {
-		return req<ListSkillsResponse>("/skills");
+	list(cwd?: string): Promise<ListSkillsResponse> {
+		return req<ListSkillsResponse>(withCwd("/skills", cwd));
 	},
-	detail(pluginId: string, skillName: string): Promise<SkillDetailResponse> {
-		// pluginId is `name@marketplace`. Hono auto-decodes path params, so
-		// either form works on the wire — but stay strict about encoding here
-		// because future callers may pick up `/`-containing names.
-		return req<SkillDetailResponse>(
-			`/skills/${encodeURIComponent(pluginId)}/${encodeURIComponent(skillName)}`,
-		);
+	detail(id: string, cwd?: string): Promise<SkillDetailResponse> {
+		// `id` is server-issued (base64url of the SKILL.md path). Clients
+		// pass it back opaquely; the server validates that the decoded path
+		// was actually returned by loadCapability before reading.
+		return req<SkillDetailResponse>(withCwd(`/skills/${encodeURIComponent(id)}`, cwd));
 	},
 };

@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Package, Search, Sparkles } from "lucide-react";
-import type { ListSkillsResponse, SkillDetailResponse, SkillSummary } from "@omp-deck/protocol";
+import { ArrowLeft, Loader2, Search, Sparkles } from "lucide-react";
+import type {
+	ListSkillsResponse,
+	SkillDetailResponse,
+	SkillSummary,
+} from "@omp-deck/protocol";
 
 import { Layout } from "@/components/Layout";
 import { Markdown } from "@/lib/markdown";
@@ -8,19 +12,29 @@ import { skillsApi } from "@/lib/skills-api";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
-type ScopeFilter = "all" | "user" | "project";
+type LevelFilter = "all" | "user" | "project";
 
+/**
+ * Cockpit for every skill `omp` discovers — across `native`, `claude-plugins`,
+ * `claude`, `codex`, and the other discovery providers. Native sits at the top
+ * by default; the source filter rail surfaces all other providers.
+ */
 export function SkillsView() {
 	const [data, setData] = useState<ListSkillsResponse | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | undefined>();
 	const [search, setSearch] = useState("");
-	const [scope, setScope] = useState<ScopeFilter>("all");
-	const [pluginFilter, setPluginFilter] = useState<string | "all">("all");
+	const [providerFilter, setProviderFilter] = useState<string | "all">("all");
+	const [levelFilter, setLevelFilter] = useState<LevelFilter>("all");
 	const [selectedId, setSelectedId] = useState<string | undefined>();
 	const [detail, setDetail] = useState<SkillDetailResponse | null>(null);
 	const [detailLoading, setDetailLoading] = useState(false);
 	const [detailError, setDetailError] = useState<string | undefined>();
+	// On narrow screens (< lg) the list and detail can't share a column, so
+	// they stack as a master/detail navigation: list visible until the user
+	// picks a row, then we slide to detail with a back affordance. At lg+ the
+	// CSS grid renders them side-by-side and this flag is inert.
+	const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
 
 	const refresh = useCallback(async (): Promise<void> => {
 		try {
@@ -38,8 +52,6 @@ export function SkillsView() {
 		void refresh();
 	}, [refresh]);
 
-	// Live updates: any plugin/skill mutation bumps the counter. Refetch when it
-	// changes (mirrors TasksView's tasksChangeCounter pattern).
 	const skillsChangeCounter = useStore((s) => s.skillsChangeCounter);
 	useEffect(() => {
 		if (skillsChangeCounter === 0) return;
@@ -50,13 +62,14 @@ export function SkillsView() {
 		const skills = data?.skills ?? [];
 		const q = search.trim().toLowerCase();
 		return skills.filter((s) => {
-			if (scope !== "all" && s.scope !== scope) return false;
-			if (pluginFilter !== "all" && s.pluginId !== pluginFilter) return false;
+			if (providerFilter !== "all" && s.provider !== providerFilter) return false;
+			if (levelFilter !== "all" && s.level !== levelFilter) return false;
 			if (!q) return true;
 			const hay = [
-				s.frontmatter.name,
+				s.name,
 				s.dirName,
-				s.pluginName,
+				s.providerLabel,
+				s.pluginName ?? "",
 				s.frontmatter.description ?? "",
 				(s.frontmatter.triggers ?? []).join(" "),
 				(s.frontmatter.tags ?? []).join(" "),
@@ -65,10 +78,8 @@ export function SkillsView() {
 				.toLowerCase();
 			return hay.includes(q);
 		});
-	}, [data, search, scope, pluginFilter]);
+	}, [data, search, providerFilter, levelFilter]);
 
-	// Default selection: first filtered skill. Updated whenever the filter
-	// changes and the prior selection drops out.
 	const selected = filtered.find((s) => s.id === selectedId) ?? filtered[0];
 
 	useEffect(() => {
@@ -81,7 +92,7 @@ export function SkillsView() {
 		setDetailLoading(true);
 		setDetailError(undefined);
 		skillsApi
-			.detail(selected.pluginId, selected.dirName)
+			.detail(selected.id)
 			.then((d) => {
 				if (cancelled) return;
 				setDetail(d);
@@ -104,10 +115,10 @@ export function SkillsView() {
 			sidebar={
 				<SkillsSidebar
 					skills={data?.skills ?? []}
-					scope={scope}
-					onScope={setScope}
-					pluginFilter={pluginFilter}
-					onPluginFilter={setPluginFilter}
+					providerFilter={providerFilter}
+					onProviderFilter={setProviderFilter}
+					levelFilter={levelFilter}
+					onLevelFilter={setLevelFilter}
 				/>
 			}
 			inspector={<SkillInspector skill={selected} detail={detail} />}
@@ -125,7 +136,7 @@ export function SkillsView() {
 								value={search}
 								onChange={(e) => setSearch(e.target.value)}
 								placeholder="Search name, description, triggers, tags"
-								className="w-72 bg-transparent text-ink placeholder:text-ink-4 focus:outline-none"
+								className="w-full bg-transparent text-ink placeholder:text-ink-4 focus:outline-none sm:w-72"
 							/>
 						</div>
 					</div>
@@ -137,30 +148,44 @@ export function SkillsView() {
 					) : null}
 
 					<div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
-						<div className="min-h-0 overflow-y-auto border-r border-line">
+						<div
+							className={cn(
+								"min-h-0 overflow-y-auto border-line lg:block lg:border-r",
+								mobileDetailOpen ? "hidden" : "block",
+							)}
+						>
 							{loading && !data ? (
 								<div className="px-3 py-6 text-center text-sm text-ink-3">Loading skills...</div>
 							) : null}
 							{!loading && filtered.length === 0 ? (
-								<EmptyState plugins={data?.plugins.length ?? 0} />
+								<EmptyState total={data?.skills.length ?? 0} />
 							) : null}
 							{filtered.map((s) => (
 								<SkillRow
 									key={s.id}
 									skill={s}
 									active={selected?.id === s.id}
-									onClick={() => setSelectedId(s.id)}
+									onClick={() => {
+										setSelectedId(s.id);
+										setMobileDetailOpen(true);
+									}}
 								/>
 							))}
 						</div>
 
-						<div className="min-h-0 overflow-y-auto">
+						<div
+							className={cn(
+								"min-h-0 overflow-y-auto lg:block",
+								mobileDetailOpen ? "block" : "hidden",
+							)}
+						>
 							{!selected ? null : (
 								<SkillDetailPane
 									skill={selected}
 									detail={detail}
 									loading={detailLoading}
 									error={detailError}
+									onBack={() => setMobileDetailOpen(false)}
 								/>
 							)}
 						</div>
@@ -184,18 +209,22 @@ function SkillRow({ skill, active, onClick }: { skill: SkillSummary; active: boo
 		>
 			<div className="flex w-full items-center gap-2">
 				<Sparkles className="h-3.5 w-3.5 shrink-0 text-accent" />
-				<span className="truncate text-sm font-medium text-ink">{skill.frontmatter.name}</span>
+				<span className="truncate text-sm font-medium text-ink">{skill.name}</span>
 				{!skill.enabled ? (
 					<span className="ml-auto rounded bg-paper-3 px-1.5 py-0.5 font-mono text-2xs uppercase tracking-meta text-ink-3">
-						disabled
+						hidden
 					</span>
 				) : null}
 			</div>
 			<div className="flex w-full items-center gap-2 font-mono text-2xs text-ink-3">
-				<Package className="h-3 w-3 shrink-0" />
-				<span className="truncate">{skill.pluginName}</span>
-				<span className="text-ink-4">·</span>
-				<span className="uppercase tracking-meta">{skill.scope}</span>
+				<ProviderBadge provider={skill.provider} label={skill.providerLabel} />
+				<span className="uppercase tracking-meta">{skill.level}</span>
+				{skill.pluginName ? (
+					<>
+						<span className="text-ink-4">·</span>
+						<span className="truncate">{skill.pluginName}</span>
+					</>
+				) : null}
 			</div>
 			{skill.frontmatter.description ? (
 				<div className="line-clamp-2 text-xs text-ink-3">{skill.frontmatter.description}</div>
@@ -204,29 +233,63 @@ function SkillRow({ skill, active, onClick }: { skill: SkillSummary; active: boo
 	);
 }
 
+function ProviderBadge({ provider, label }: { provider: string; label: string }) {
+	// Color tag native distinctly; everything else gets a muted treatment.
+	const tone = provider === "native" ? "bg-accent-soft/50 text-accent" : "bg-paper-3 text-ink-2";
+	return (
+		<span className={cn("rounded px-1.5 py-0.5 font-mono text-2xs uppercase tracking-meta", tone)}>
+			{label}
+		</span>
+	);
+}
+
 function SkillDetailPane({
 	skill,
 	detail,
 	loading,
 	error,
+	onBack,
 }: {
 	skill: SkillSummary;
 	detail: SkillDetailResponse | null;
 	loading: boolean;
 	error: string | undefined;
+	onBack?: () => void;
 }) {
 	return (
 		<div className="flex h-full flex-col">
 			<div className="border-b border-line px-4 py-3">
 				<div className="flex items-center gap-2">
+					{onBack ? (
+						<button
+							type="button"
+							onClick={onBack}
+							aria-label="Back to skill list"
+							className="-ml-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-paper-3 hover:text-ink lg:hidden"
+						>
+							<ArrowLeft className="h-4 w-4" />
+						</button>
+					) : null}
 					<Sparkles className="h-4 w-4 text-accent" />
-					<h1 className="text-base font-medium text-ink">{skill.frontmatter.name}</h1>
-					<span className="ml-auto font-mono text-2xs uppercase tracking-meta text-ink-3">
-						{skill.scope}
-					</span>
+					<h1 className="text-base font-medium text-ink">{skill.name}</h1>
+					<div className="ml-auto flex items-center gap-2">
+						<ProviderBadge provider={skill.provider} label={skill.providerLabel} />
+						<span className="font-mono text-2xs uppercase tracking-meta text-ink-3">
+							{skill.level}
+						</span>
+					</div>
 				</div>
 				<div className="mt-1 font-mono text-2xs text-ink-3">
-					<span className="text-ink-4">from</span> {skill.pluginId}
+					{skill.pluginId ? (
+						<>
+							<span className="text-ink-4">from plugin</span> {skill.pluginId}
+						</>
+					) : (
+						<>
+							<span className="text-ink-4">from</span> {skill.providerLabel}
+							<span className="text-ink-4"> · dir</span> {skill.dirName}
+						</>
+					)}
 				</div>
 				{skill.frontmatter.description ? (
 					<p className="mt-2 text-sm text-ink-2">{skill.frontmatter.description}</p>
@@ -276,15 +339,17 @@ function TagRow({ label, values }: { label: string; values: readonly string[] })
 	);
 }
 
-function EmptyState({ plugins }: { plugins: number }) {
+function EmptyState({ total }: { total: number }) {
 	return (
 		<div className="flex h-full flex-col items-center justify-center px-6 py-10 text-center">
 			<Sparkles className="h-6 w-6 text-ink-4" />
-			<div className="mt-3 text-sm text-ink-2">No skills found.</div>
+			<div className="mt-3 text-sm text-ink-2">
+				{total === 0 ? "No skills discovered" : "No skills match the current filters"}
+			</div>
 			<div className="mt-1 max-w-xs text-xs text-ink-3">
-				{plugins === 0
-					? "Install a plugin from the Marketplace to see its skills here."
-					: "Your installed plugins don't ship any skills, or filters are hiding them all."}
+				{total === 0
+					? "Drop a SKILL.md into ~/.omp/agent/skills/<name>/, or install a marketplace plugin."
+					: "Try clearing the source / level filters or the search box."}
 			</div>
 		</div>
 	);
@@ -292,34 +357,34 @@ function EmptyState({ plugins }: { plugins: number }) {
 
 function SkillsSidebar({
 	skills,
-	scope,
-	onScope,
-	pluginFilter,
-	onPluginFilter,
+	providerFilter,
+	onProviderFilter,
+	levelFilter,
+	onLevelFilter,
 }: {
 	skills: SkillSummary[];
-	scope: ScopeFilter;
-	onScope: (s: ScopeFilter) => void;
-	pluginFilter: string | "all";
-	onPluginFilter: (p: string | "all") => void;
+	providerFilter: string | "all";
+	onProviderFilter: (p: string | "all") => void;
+	levelFilter: LevelFilter;
+	onLevelFilter: (l: LevelFilter) => void;
 }) {
-	const byPlugin = useMemo(() => {
-		const m = new Map<string, { pluginName: string; count: number }>();
+	const providers = useMemo(() => {
+		const m = new Map<string, { label: string; count: number; priority: number }>();
 		for (const s of skills) {
-			const cur = m.get(s.pluginId);
+			const cur = m.get(s.provider);
 			if (cur) cur.count += 1;
-			else m.set(s.pluginId, { pluginName: s.pluginName, count: 1 });
+			else m.set(s.provider, { label: s.providerLabel, count: 1, priority: providerPriority(s.provider) });
 		}
 		return Array.from(m.entries())
 			.map(([id, v]) => ({ id, ...v }))
-			.sort((a, b) => a.pluginName.localeCompare(b.pluginName));
+			.sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label));
 	}, [skills]);
 
-	const scopeCounts = useMemo(
+	const levelCounts = useMemo(
 		() => ({
 			all: skills.length,
-			user: skills.filter((s) => s.scope === "user").length,
-			project: skills.filter((s) => s.scope === "project").length,
+			user: skills.filter((s) => s.level === "user").length,
+			project: skills.filter((s) => s.level === "project").length,
 		}),
 		[skills],
 	);
@@ -329,45 +394,53 @@ function SkillsSidebar({
 			<div className="border-b border-line px-3 py-2">
 				<div className="meta">Skills</div>
 				<div className="mt-0.5 text-xs text-ink-3">
-					Read-only inventory of skills exposed by installed plugins. Enable / disable lives on the
-					owning plugin in <span className="text-ink-2">Marketplace</span>.
+					Every skill <span className="text-ink-2">omp</span> can reach — native, marketplace, and
+					sibling agent-tool configs. Enable/disable lives on the owning plugin or provider.
 				</div>
 			</div>
 
 			<div className="border-b border-line px-3 py-2">
-				<div className="font-mono text-2xs uppercase tracking-meta text-ink-4">Scope</div>
-				<ScopeRow label="all" count={scopeCounts.all} active={scope === "all"} onClick={() => onScope("all")} />
-				<ScopeRow label="user" count={scopeCounts.user} active={scope === "user"} onClick={() => onScope("user")} />
-				<ScopeRow label="project" count={scopeCounts.project} active={scope === "project"} onClick={() => onScope("project")} />
-			</div>
-
-			<div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
-				<div className="font-mono text-2xs uppercase tracking-meta text-ink-4">Plugin</div>
-				<ScopeRow label="all" count={skills.length} active={pluginFilter === "all"} onClick={() => onPluginFilter("all")} />
-				{byPlugin.map((p) => (
-					<ScopeRow
+				<div className="font-mono text-2xs uppercase tracking-meta text-ink-4">Source</div>
+				<FilterRow
+					label="all"
+					count={skills.length}
+					active={providerFilter === "all"}
+					onClick={() => onProviderFilter("all")}
+				/>
+				{providers.map((p) => (
+					<FilterRow
 						key={p.id}
-						label={p.pluginName}
+						label={p.label}
 						count={p.count}
-						active={pluginFilter === p.id}
-						onClick={() => onPluginFilter(p.id)}
+						active={providerFilter === p.id}
+						onClick={() => onProviderFilter(p.id)}
+						highlight={p.id === "native"}
 					/>
 				))}
+			</div>
+
+			<div className="min-h-0 px-3 py-2">
+				<div className="font-mono text-2xs uppercase tracking-meta text-ink-4">Level</div>
+				<FilterRow label="all" count={levelCounts.all} active={levelFilter === "all"} onClick={() => onLevelFilter("all")} />
+				<FilterRow label="user" count={levelCounts.user} active={levelFilter === "user"} onClick={() => onLevelFilter("user")} />
+				<FilterRow label="project" count={levelCounts.project} active={levelFilter === "project"} onClick={() => onLevelFilter("project")} />
 			</div>
 		</div>
 	);
 }
 
-function ScopeRow({
+function FilterRow({
 	label,
 	count,
 	active,
 	onClick,
+	highlight,
 }: {
 	label: string;
 	count: number;
 	active: boolean;
 	onClick: () => void;
+	highlight?: boolean;
 }) {
 	return (
 		<button
@@ -375,11 +448,15 @@ function ScopeRow({
 			onClick={onClick}
 			className={cn(
 				"flex w-full items-center justify-between rounded-md px-2 py-1 text-left text-sm transition-colors",
-				active ? "bg-accent-soft/40 text-ink" : "text-ink-2 hover:bg-paper-3",
+				active
+					? "bg-accent-soft/40 text-ink"
+					: highlight
+						? "text-accent hover:bg-paper-3"
+						: "text-ink-2 hover:bg-paper-3",
 			)}
 		>
 			<span className="truncate">{label}</span>
-			<span className="font-mono text-2xs text-ink-3">{count}</span>
+			<span className={cn("font-mono text-2xs", active ? "text-ink-2" : "text-ink-3")}>{count}</span>
 		</button>
 	);
 }
@@ -401,15 +478,18 @@ function SkillInspector({
 				<div className="mt-0.5 text-xs text-ink-3">SKILL.md frontmatter + co-located files.</div>
 			</div>
 			<div className="space-y-3 overflow-y-auto px-3 py-3 text-xs">
-				<DefRow k="name" v={<span className="font-mono">{skill.frontmatter.name}</span>} />
+				<DefRow k="name" v={<span className="font-mono">{skill.name}</span>} />
 				<DefRow k="dir" v={<span className="font-mono">{skill.dirName}</span>} />
-				<DefRow k="plugin" v={<span className="font-mono">{skill.pluginId}</span>} />
-				<DefRow k="scope" v={<span className="font-mono uppercase">{skill.scope}</span>} />
+				<DefRow k="provider" v={<span className="font-mono">{skill.providerLabel} ({skill.provider})</span>} />
+				<DefRow k="level" v={<span className="font-mono uppercase">{skill.level}</span>} />
+				{skill.pluginId ? (
+					<DefRow k="plugin" v={<span className="font-mono">{skill.pluginId}</span>} />
+				) : null}
 				<DefRow
 					k="enabled"
 					v={
 						<span className={cn("font-mono", skill.enabled ? "text-success" : "text-ink-3")}>
-							{skill.enabled ? "yes" : "no (plugin disabled)"}
+							{skill.enabled ? "yes" : "hidden (frontmatter)"}
 						</span>
 					}
 				/>
@@ -421,9 +501,12 @@ function SkillInspector({
 				{detail && detail.files.length > 0 ? (
 					<div>
 						<div className="font-mono text-2xs uppercase tracking-meta text-ink-4">
-							Files ({detail.files.filter((f) => f.kind === "file").length})
+							Bundled files ({detail.files.filter((f) => f.kind === "file").length})
 						</div>
-						<ul className="mt-1 space-y-0.5 font-mono text-2xs">
+						<div className="mt-1 text-2xs text-ink-4">
+							Reachable on demand — not auto-injected into the agent's context.
+						</div>
+						<ul className="mt-2 space-y-0.5 font-mono text-2xs">
 							{detail.files.map((f) => (
 								<li
 									key={f.relPath}
@@ -459,4 +542,33 @@ function formatBytes(n: number): string {
 	if (n < 1024) return `${n}B`;
 	if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}K`;
 	return `${(n / (1024 * 1024)).toFixed(1)}M`;
+}
+
+function providerPriority(provider: string): number {
+	switch (provider) {
+		case "native":
+			return 0;
+		case "claude-plugins":
+			return 1;
+		case "claude":
+			return 2;
+		case "codex":
+			return 3;
+		case "opencode":
+			return 4;
+		case "cursor":
+			return 5;
+		case "windsurf":
+			return 6;
+		case "cline":
+			return 7;
+		case "gemini":
+			return 8;
+		case "agents":
+			return 9;
+		case "custom":
+			return 10;
+		default:
+			return 100;
+	}
 }

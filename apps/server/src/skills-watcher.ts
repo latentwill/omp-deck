@@ -1,22 +1,34 @@
 /**
- * Filesystem watcher rooted at the marketplace plugin cache directory. Fires
- * a debounced `skills_changed` broadcast whenever a SKILL.md, plugin.json, or
- * plugin tree mutates so the UI can refetch without polling.
+ * Filesystem watchers across every root that contributes skills omp will load:
+ *
+ *   1. `~/.omp/agent/skills/`      — omp-native user skills
+ *   2. `<defaultCwd>/.omp/skills/` — omp-native project skills for the deck's
+ *                                    default workspace (others come on demand
+ *                                    when the UI passes `?cwd=`)
+ *   3. `getPluginsCacheDir()`      — claude-plugin marketplace installs
+ *
+ * Anything (create, write, rename, delete) under any of these fires a debounced
+ * `skills_changed` broadcast so the UI refetches without polling.
  *
  * Gated by `OMP_DECK_WATCH_SKILLS` (default on). Set `=0` to disable when
  * running on filesystems that misbehave under recursive watch (some VPNs,
- * network drives, OneDrive shadowing). On first watcher error we log + stop
- * — the cockpit still works, the UI just has to refetch manually.
+ * network drives, OneDrive shadowing). Per-root watch errors degrade to no-op
+ * for that root only; the rest keep working.
  *
- * Phase 1 of the Skills Cockpit (docs/proposals/skills-cockpit.md). Polling
- * fallback is deferred until we see an actual environment that needs it.
+ * Phase 1.5 of the Skills Cockpit (docs/proposals/skills-cockpit.md). The
+ * `claude`/`codex`/`opencode` provider roots are not watched yet — if a user
+ * authors against those they'll see changes on next refetch.
  */
 
 import { watch, type FSWatcher } from "node:fs";
+import { existsSync } from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 import { getPluginsCacheDir } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace";
 
 import { broadcastBus } from "./broadcast-bus.ts";
+import type { Config } from "./config.ts";
 import { logger } from "./log.ts";
 
 const log = logger("skills:watcher");
@@ -26,14 +38,24 @@ const log = logger("skills:watcher");
 // short enough that the UI feels live and long enough to coalesce a burst.
 const DEBOUNCE_MS = 250;
 
-export function startSkillsWatcher(): () => void {
+export function startSkillsWatcher(config: Config): () => void {
 	if (process.env.OMP_DECK_WATCH_SKILLS === "0") {
 		log.info("skills watcher disabled via OMP_DECK_WATCH_SKILLS=0");
 		return () => {};
 	}
 
-	const root = getPluginsCacheDir();
-	let watcher: FSWatcher | undefined;
+	const home = os.homedir();
+	const roots = [
+		// Native: user-level OMP skills
+		path.join(home, ".omp", "agent", "skills"),
+		// Native: project-level skills for the deck's default cwd. Other
+		// project cwds get coverage by the manual-refetch path via WS.
+		path.join(config.defaultCwd, ".omp", "skills"),
+		// Marketplace plugin cache (Claude-plugin format)
+		getPluginsCacheDir(),
+	];
+
+	const watchers: FSWatcher[] = [];
 	let pending: ReturnType<typeof setTimeout> | undefined;
 	let disposed = false;
 
@@ -47,45 +69,47 @@ export function startSkillsWatcher(): () => void {
 		pending = setTimeout(fire, DEBOUNCE_MS);
 	};
 
-	try {
-		watcher = watch(root, { recursive: true, persistent: false }, (_eventType, filename) => {
-			// We don't filter by `filename` here — both SKILL.md mutations and
-			// plugin.json / install_path mutations should refetch the catalog.
-			// Filtering would also mishandle directory-level renames.
-			if (filename === null || filename === undefined) {
-				// Some platforms emit null filenames on bulk events; still fire.
+	for (const root of roots) {
+		if (!existsSync(root)) {
+			log.info(`skipping ${root} (does not exist yet)`);
+			continue;
+		}
+		try {
+			const w = watch(root, { recursive: true, persistent: false }, () => {
 				schedule();
-				return;
-			}
-			schedule();
-		});
-
-		watcher.on("error", (err) => {
-			log.warn(`watcher error, stopping (cockpit will rely on manual refresh)`, err);
-			disposeWatcher();
-		});
-
-		log.info(`watching ${root} for skills_changed broadcasts`);
-	} catch (err) {
-		log.warn(`failed to start watcher at ${root} (cockpit will rely on manual refresh)`, err);
-		watcher = undefined;
+			});
+			w.on("error", (err) => {
+				log.warn(`watcher error at ${root}, stopping that root`, err);
+				try {
+					w.close();
+				} catch {
+					// best-effort
+				}
+			});
+			watchers.push(w);
+			log.info(`watching ${root}`);
+		} catch (err) {
+			log.warn(`failed to start watcher at ${root} (cockpit will rely on manual refresh)`, err);
+		}
 	}
 
-	function disposeWatcher(): void {
+	if (watchers.length === 0) {
+		log.warn("no skill roots watchable; UI will need manual refresh");
+	}
+
+	return function disposeWatcher(): void {
 		disposed = true;
 		if (pending) {
 			clearTimeout(pending);
 			pending = undefined;
 		}
-		if (watcher) {
+		for (const w of watchers) {
 			try {
-				watcher.close();
+				w.close();
 			} catch {
 				// best-effort
 			}
-			watcher = undefined;
 		}
-	}
-
-	return disposeWatcher;
+		watchers.length = 0;
+	};
 }

@@ -45,7 +45,7 @@ async function main(): Promise<void> {
 	let server: Server<ConnectionData>;
 	const supervisor = buildDefaultBridgeSupervisor();
 	const marketplaceService = new MarketplaceService();
-	const skillsService = new SkillsService(marketplaceService);
+	const skillsService = new SkillsService(config, marketplaceService);
 	const router = buildRouter(
 		bridge,
 		config,
@@ -55,7 +55,7 @@ async function main(): Promise<void> {
 		skillsService,
 		{ restartServer: () => scheduleRestart(server) },
 	);
-	const skillsWatcherDispose = startSkillsWatcher();
+	const skillsWatcherDispose = startSkillsWatcher(config);
 	const ws = new WsHub(bridge);
 
 	server = Bun.serve<ConnectionData>({

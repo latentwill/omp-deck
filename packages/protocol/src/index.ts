@@ -253,7 +253,7 @@ export interface AddMarketplaceRequest {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Skills (skill-level enumeration over installed marketplace plugins)
+// Skills (enumeration across every omp skill provider)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -269,30 +269,59 @@ export interface SkillFrontmatter {
 }
 
 /**
- * Skill enumerated from `<plugin>/skills/<dirName>/SKILL.md`. Owning plugin
- * scope + enabled state are echoed onto each skill so the UI can render
- * inheritance without a second lookup.
+ * Provider identifier from the omp SDK's capability system. Open-ended so
+ * the deck doesn't break when omp adds a new discovery provider, but the
+ * known set is what the UI styles/labels/sorts by today.
+ */
+export type SkillProvider =
+	| "native"           // omp's own — ~/.omp/agent/skills + <cwd>/.omp/skills
+	| "claude-plugins"   // marketplace-installed plugins
+	| "claude"           // shared ~/.claude/skills + .claude/skills
+	| "codex"            // shared ~/.codex/skills + .codex/skills
+	| "opencode"
+	| "cursor"
+	| "windsurf"
+	| "cline"
+	| "gemini"
+	| "agents"           // skills nested under subagent dirs
+	| "custom"           // custom directories from runtime config
+	| (string & {});     // forward-compat
+
+/**
+ * A skill enumerated from any omp provider. `provider` + `level` say where
+ * it came from; plugin attribution is set only when the source was a
+ * marketplace-installed Claude plugin.
  */
 export interface SkillSummary {
-	/** Composite ID stable across reads: `<pluginId>/<dirName>`. */
+	/**
+	 * Server-issued opaque identifier (base64url of the absolute SKILL.md
+	 * path). Stable across reads, URL-safe, used as `/api/skills/:id`.
+	 */
 	id: string;
-	pluginId: string;
-	pluginName: string;
-	marketplace: string;
-	scope: "user" | "project";
+	/** Frontmatter `name` (falls back to dirName). */
+	name: string;
+	/** Directory under the provider's `skills/` root. */
+	dirName: string;
+	/** Provider that contributed this skill. */
+	provider: SkillProvider;
+	/** Human display label (e.g. "OMP", "Claude Plugins", "Claude Code"). */
+	providerLabel: string;
+	/** User vs project scope, from the SDK's source metadata. */
+	level: "user" | "project";
 	/** Absolute path to SKILL.md on disk. UI keeps this opaque. */
 	skillPath: string;
-	/** Directory under `<plugin>/skills/` (URL-safe segment for detail route). */
-	dirName: string;
+	/** Parsed frontmatter (name, description, model, triggers, tags). */
 	frontmatter: SkillFrontmatter;
-	/** Inherited from the owning plugin; skills toggle with the plugin. */
+	/** False only when the owning provider's enable-flag is off, or hide=true. */
 	enabled: boolean;
+	/** Plugin attribution — set only when `provider === "claude-plugins"`. */
+	pluginId?: string;
+	pluginName?: string;
+	marketplace?: string;
 }
 
 export interface ListSkillsResponse {
 	skills: SkillSummary[];
-	/** Echo of installed plugins so the UI can render plugin-level chrome. */
-	plugins: InstalledPluginInfo[];
 }
 
 /**
