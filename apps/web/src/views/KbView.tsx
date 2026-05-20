@@ -14,6 +14,7 @@ import {
 	Link2Off,
 	Loader2,
 	Pencil,
+	Network,
 	Save,
 	Search,
 	X,
@@ -29,6 +30,7 @@ import { CopyButton } from "@/lib/CopyButton";
 import { kbApi } from "@/lib/kb-api";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { KbGraphPane } from "./KbGraphPane";
 
 /**
  * /kb — Karpathy-style llm-wiki viewer. Sidebar = tree; main = markdown
@@ -61,6 +63,19 @@ export function KbView() {
 
 	const kbChangeCounter = useStore((s) => s.kbChangeCounter);
 
+	// `view` URL param picks between the file-viewer and the force-directed
+	// graph. We default to file; the graph is opt-in via the top-bar toggle.
+	const viewMode: "file" | "graph" = params.get("view") === "graph" ? "graph" : "file";
+	const setViewMode = useCallback(
+		(v: "file" | "graph") => {
+			const next = new URLSearchParams(params);
+			if (v === "graph") next.set("view", "graph");
+			else next.delete("view");
+			setParams(next, { replace: false });
+		},
+		[params, setParams],
+	);
+
 	return (
 		<Layout
 			sidebar={<KbSidebar />}
@@ -70,40 +85,54 @@ export function KbView() {
 					<KbTopBar
 						currentPath={currentPath}
 						mobileDetailOpen={mobileDetailOpen}
+						viewMode={viewMode}
+						onViewMode={setViewMode}
 						onBack={() => {
 							setMobileDetailOpen(false);
 							setCurrentPath(undefined);
 						}}
 					/>
-					<div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
-						<div
-							className={cn(
-								"min-h-0 overflow-y-auto border-line lg:block lg:border-r",
-								mobileDetailOpen ? "hidden" : "block",
-							)}
-						>
-							<KbTree
-								currentPath={currentPath}
-								onSelect={(p) => {
-									setCurrentPath(p);
-									setMobileDetailOpen(true);
-								}}
-								kbChangeCounter={kbChangeCounter}
-							/>
+					{viewMode === "graph" ? (
+						<KbGraphPane
+							currentPath={currentPath}
+							onSelect={(p) => {
+								setCurrentPath(p);
+								setViewMode("file");
+								setMobileDetailOpen(true);
+							}}
+							kbChangeCounter={kbChangeCounter}
+						/>
+					) : (
+						<div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
+							<div
+								className={cn(
+									"min-h-0 overflow-y-auto border-line lg:block lg:border-r",
+									mobileDetailOpen ? "hidden" : "block",
+								)}
+							>
+								<KbTree
+									currentPath={currentPath}
+									onSelect={(p) => {
+										setCurrentPath(p);
+										setMobileDetailOpen(true);
+									}}
+									kbChangeCounter={kbChangeCounter}
+								/>
+							</div>
+							<div
+								className={cn(
+									"min-h-0 overflow-y-auto lg:block",
+									mobileDetailOpen ? "block" : "hidden lg:block",
+								)}
+							>
+								{currentPath ? (
+									<KbFilePane path={currentPath} onNavigate={(p) => setCurrentPath(p)} kbChangeCounter={kbChangeCounter} />
+								) : (
+									<KbEmpty />
+								)}
+							</div>
 						</div>
-						<div
-							className={cn(
-								"min-h-0 overflow-y-auto lg:block",
-								mobileDetailOpen ? "block" : "hidden lg:block",
-							)}
-						>
-							{currentPath ? (
-								<KbFilePane path={currentPath} onNavigate={(p) => setCurrentPath(p)} kbChangeCounter={kbChangeCounter} />
-							) : (
-								<KbEmpty />
-							)}
-						</div>
-					</div>
+					)}
 				</div>
 			}
 		/>
@@ -113,15 +142,19 @@ export function KbView() {
 function KbTopBar({
 	currentPath,
 	mobileDetailOpen,
+	viewMode,
+	onViewMode,
 	onBack,
 }: {
 	currentPath: string | undefined;
 	mobileDetailOpen: boolean;
+	viewMode: "file" | "graph";
+	onViewMode: (v: "file" | "graph") => void;
 	onBack: () => void;
 }) {
 	return (
 		<div className="flex h-10 shrink-0 items-center gap-2 border-b border-line bg-paper px-3">
-			{mobileDetailOpen ? (
+			{mobileDetailOpen && viewMode === "file" ? (
 				<button
 					type="button"
 					onClick={onBack}
@@ -133,7 +166,35 @@ function KbTopBar({
 			) : null}
 			<BookOpen className="h-4 w-4 text-accent" aria-hidden="true" />
 			<div className="meta">Knowledge</div>
-			<div className="min-w-0 truncate font-mono text-xs text-ink-3">{currentPath ?? "browse"}</div>
+			<div className="min-w-0 truncate font-mono text-xs text-ink-3">
+				{viewMode === "graph" ? "graph" : (currentPath ?? "browse")}
+			</div>
+			<div className="ml-auto inline-flex items-center rounded-md border border-line bg-paper-2 p-0.5 text-xs">
+				<button
+					type="button"
+					onClick={() => onViewMode("file")}
+					className={cn(
+						"inline-flex h-6 items-center gap-1 rounded px-2 transition-colors",
+						viewMode === "file" ? "bg-accent-soft/50 text-ink" : "text-ink-3 hover:text-ink",
+					)}
+					title="File viewer (?view=file)"
+				>
+					<FileText className="h-3.5 w-3.5" />
+					File
+				</button>
+				<button
+					type="button"
+					onClick={() => onViewMode("graph")}
+					className={cn(
+						"inline-flex h-6 items-center gap-1 rounded px-2 transition-colors",
+						viewMode === "graph" ? "bg-accent-soft/50 text-ink" : "text-ink-3 hover:text-ink",
+					)}
+					title="Force-directed graph (?view=graph)"
+				>
+					<Network className="h-3.5 w-3.5" />
+					Graph
+				</button>
+			</div>
 		</div>
 	);
 }

@@ -756,10 +756,21 @@ function parseFrontmatter(text: string): {
 	body: string;
 } {
 	if (!text.startsWith("---")) return { frontmatter: {}, body: text };
-	const end = text.indexOf("\n---", 3);
-	if (end < 0) return { frontmatter: {}, body: text };
-	const rawBlock = text.slice(4, end);
-	let cursor = end + 4;
+	// Find the closing `---` fence. Tolerate both LF and CRLF line endings; on
+	// Windows-saved kb files the closer is `\r\n---` so we search for that
+	// shape first and fall back to bare LF.
+	let openerEnd = 3;
+	if (text[3] === "\r") openerEnd = 4;
+	if (text[openerEnd] === "\n") openerEnd += 1;
+	else return { frontmatter: {}, body: text };
+
+	const closeLF = text.indexOf("\n---", openerEnd);
+	if (closeLF < 0) return { frontmatter: {}, body: text };
+	// Normalize the block to LF before handing to YAML — a trailing `\r`
+	// before the closing fence is what yanks the parser into
+	// "Unexpected scalar at node end" on CRLF files.
+	const rawBlock = text.slice(openerEnd, closeLF).replace(/\r\n/g, "\n").replace(/\r$/, "");
+	let cursor = closeLF + 4;
 	if (text[cursor] === "\r") cursor += 1;
 	if (text[cursor] === "\n") cursor += 1;
 	const body = text.slice(cursor);

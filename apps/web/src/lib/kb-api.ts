@@ -1,4 +1,9 @@
-import type { KbFileResponse, KbTreeResponse } from "@omp-deck/protocol";
+import type {
+	KbBacklinksResponse,
+	KbFileResponse,
+	KbGraphResponse,
+	KbTreeResponse,
+} from "@omp-deck/protocol";
 
 const BASE = "/api";
 
@@ -41,5 +46,11 @@ export const kbApi = {
 			method: "POST",
 			body: JSON.stringify({ content }),
 		});
+	},
+	graph(): Promise<KbGraphResponse> {
+		return req<KbGraphResponse>("/kb/graph");
+	},
+	backlinks(path: string): Promise<KbBacklinksResponse> {
+		return req<KbBacklinksResponse>(`/kb/backlinks${qs({ path })}`);
 	},
 };
