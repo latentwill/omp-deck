@@ -267,6 +267,8 @@ function colorForDir(name: string): string {
 	switch (name) {
 		case "cryptocracy":
 			return "#a855f7"; // violet
+		case "projects":
+			return "#ef4444"; // red — distinct from cryptocracy violet
 		case "domains":
 			return "#3b82f6"; // blue
 		case "tools":

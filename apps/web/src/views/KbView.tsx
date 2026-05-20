@@ -23,7 +23,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import type { KbFileResponse, KbTreeEntry, KbTreeResponse } from "@omp-deck/protocol";
+import type { KbBacklink, KbFileResponse, KbTreeEntry, KbTreeResponse } from "@omp-deck/protocol";
 
 import { Layout } from "@/components/Layout";
 import { CopyButton } from "@/lib/CopyButton";
@@ -99,7 +99,21 @@ export function KbView() {
 	return (
 		<Layout
 			sidebar={<KbSidebar />}
-			inspector={<KbInspector currentPath={currentPath} kbChangeCounter={kbChangeCounter} />}
+			inspector={
+				<KbInspector
+					currentPath={currentPath}
+					onNavigate={(p) => {
+						// Respect current view mode so clicking a backlink from graph
+						// mode keeps the graph mounted (preview-pane behavior).
+						const next = new URLSearchParams(params);
+						next.set("path", p);
+						if (viewMode === "graph") next.set("view", "graph");
+						setParams(next, { replace: false });
+						setMobileDetailOpen(true);
+					}}
+					kbChangeCounter={kbChangeCounter}
+				/>
+			}
 			main={
 				<div className="flex h-full min-h-0 flex-col">
 					{status && status.fileCount === 0 ? (
@@ -279,8 +293,8 @@ function KbEmpty() {
 			<BookOpen className="h-6 w-6 text-ink-4" />
 			<div className="mt-3 text-sm text-ink-2">Pick a file from the tree.</div>
 			<div className="mt-1 max-w-sm text-xs text-ink-3">
-				The KB cockpit reads your wiki at <span className="font-mono text-ink-2">~/kb</span>. Top-level
-				<span className="font-mono"> projects/</span> is excluded by default.
+				The KB cockpit reads your wiki at <span className="font-mono text-ink-2">~/kb</span>. Set{" "}
+				<span className="font-mono">OMP_DECK_KB_EXCLUDE_DIRS</span> to hide subtrees if you need to.
 			</div>
 		</div>
 	);
@@ -387,8 +401,8 @@ function KbSidebar() {
 			</div>
 			<div className="min-h-0 flex-1 px-3 py-2 text-xs text-ink-3">
 				The cockpit reads <span className="font-mono">~/kb</span> via{" "}
-				<span className="font-mono">OMP_DECK_KB_ROOT</span>.{" "}
-				<span className="font-mono">projects/</span> is excluded by default.
+				<span className="font-mono">OMP_DECK_KB_ROOT</span>. Hide subtrees via{" "}
+				<span className="font-mono">OMP_DECK_KB_EXCLUDE_DIRS</span>.
 			</div>
 		</div>
 	);
@@ -823,22 +837,40 @@ async function createUnresolved(target: string, currentFilePath: string, onNavig
 
 function KbInspector({
 	currentPath,
+	onNavigate,
 	kbChangeCounter,
 }: {
 	currentPath: string | undefined;
+	onNavigate: (p: string) => void;
 	kbChangeCounter: number;
 }) {
 	const [file, setFile] = useState<KbFileResponse | null>(null);
+	const [backlinks, setBacklinks] = useState<KbBacklink[]>([]);
+	const [backlinksLoading, setBacklinksLoading] = useState(false);
+
 	useEffect(() => {
 		if (!currentPath) {
 			setFile(null);
+			setBacklinks([]);
 			return;
 		}
 		let cancelled = false;
+		setBacklinksLoading(true);
 		kbApi.file(currentPath).then((d) => {
 			if (!cancelled) setFile(d);
 		}).catch(() => {
 			if (!cancelled) setFile(null);
+		});
+		kbApi.backlinks(currentPath).then((b) => {
+			if (!cancelled) {
+				setBacklinks(b.backlinks);
+				setBacklinksLoading(false);
+			}
+		}).catch(() => {
+			if (!cancelled) {
+				setBacklinks([]);
+				setBacklinksLoading(false);
+			}
 		});
 		return () => {
 			cancelled = true;
@@ -849,11 +881,15 @@ function KbInspector({
 		return <div className="px-3 py-4 text-xs text-ink-3">Pick a file to inspect.</div>;
 	}
 
+	const isOrphan = file !== null && !backlinksLoading && backlinks.length === 0;
+
 	return (
 		<div className="flex h-full flex-col">
 			<div className="border-b border-line px-3 py-2">
 				<div className="meta">Inspector</div>
-				<div className="mt-0.5 text-xs text-ink-3">Frontmatter and outbound links.</div>
+				<div className="mt-0.5 text-xs text-ink-3">
+					Frontmatter, outbound, backlinks, tags.
+				</div>
 			</div>
 			<div className="space-y-3 overflow-y-auto px-3 py-3 text-xs">
 				{file ? (
@@ -861,8 +897,20 @@ function KbInspector({
 						<DefRow k="path" v={<span className="break-all font-mono text-2xs">{file.path}</span>} />
 						<DefRow k="size" v={<span className="font-mono text-2xs">{formatBytes(file.size)}</span>} />
 						<DefRow k="updated" v={<span className="font-mono text-2xs">{formatTime(file.mtime)}</span>} />
+						{isOrphan ? (
+							<div className="flex items-center gap-1.5 rounded-md border border-warn/30 bg-warn/10 px-2 py-1 font-mono text-2xs text-warn">
+								<Link2Off className="h-3 w-3" />
+								orphan — no backlinks
+							</div>
+						) : null}
+						<TagChips fm={file.frontmatter} />
 						<FrontmatterBlock fm={file.frontmatter} />
-						<OutboundBlock links={file.outgoingLinks} />
+						<OutboundBlock links={file.outgoingLinks} onNavigate={onNavigate} />
+						<BacklinksBlock
+							backlinks={backlinks}
+							loading={backlinksLoading}
+							onNavigate={onNavigate}
+						/>
 					</>
 				) : (
 					<div className="text-ink-3">loading…</div>
@@ -901,7 +949,13 @@ function FrontmatterBlock({ fm }: { fm: Record<string, unknown> }) {
 	);
 }
 
-function OutboundBlock({ links }: { links: KbFileResponse["outgoingLinks"] }) {
+function OutboundBlock({
+	links,
+	onNavigate,
+}: {
+	links: KbFileResponse["outgoingLinks"];
+	onNavigate: (p: string) => void;
+}) {
 	if (links.length === 0) {
 		return <div className="text-2xs text-ink-3">no outbound links</div>;
 	}
@@ -914,18 +968,100 @@ function OutboundBlock({ links }: { links: KbFileResponse["outgoingLinks"] }) {
 			</div>
 			<ul className="mt-1 space-y-0.5 font-mono text-2xs">
 				{resolved.map((l, i) => (
-					<li key={`r-${i}`} className="flex items-center gap-1.5 text-ink-2">
-						<Link2 className="h-3 w-3 shrink-0 text-ink-3" />
-						<span className="truncate">{l.label}</span>
+					<li key={`r-${i}`}>
+						<button
+							type="button"
+							onClick={() => l.resolved && onNavigate(l.resolved)}
+							className="flex w-full items-center gap-1.5 truncate rounded px-1 py-0.5 text-left text-ink-2 transition-colors hover:bg-paper-3 hover:text-ink"
+							title={l.resolved ?? ""}
+						>
+							<Link2 className="h-3 w-3 shrink-0 text-accent" />
+							<span className="truncate">{l.label}</span>
+						</button>
 					</li>
 				))}
 				{unresolved.map((l, i) => (
-					<li key={`u-${i}`} className="flex items-center gap-1.5 text-ink-3" title={l.unresolvedReason}>
+					<li
+						key={`u-${i}`}
+						className="flex items-center gap-1.5 px-1 py-0.5 text-ink-3"
+						title={l.unresolvedReason}
+					>
 						<Link2Off className="h-3 w-3 shrink-0" />
 						<span className="truncate italic">{l.label}</span>
 					</li>
 				))}
 			</ul>
+		</div>
+	);
+}
+
+function BacklinksBlock({
+	backlinks,
+	loading,
+	onNavigate,
+}: {
+	backlinks: KbBacklink[];
+	loading: boolean;
+	onNavigate: (p: string) => void;
+}) {
+	if (loading) {
+		return (
+			<div className="text-2xs text-ink-3">
+				<Loader2 className="mr-1 inline-block h-3 w-3 animate-spin" /> loading backlinks…
+			</div>
+		);
+	}
+	if (backlinks.length === 0) {
+		return <div className="text-2xs text-ink-3">no backlinks</div>;
+	}
+	return (
+		<div>
+			<div className="font-mono text-2xs uppercase tracking-meta text-ink-4">
+				backlinks ({backlinks.length})
+			</div>
+			<ul className="mt-1 space-y-1 font-mono text-2xs">
+				{backlinks.map((b, i) => (
+					<li key={`b-${i}`} className="rounded px-1 py-0.5 hover:bg-paper-3">
+						<button
+							type="button"
+							onClick={() => onNavigate(b.source)}
+							className="flex w-full items-start gap-1.5 text-left"
+							title={b.source}
+						>
+							<Link2 className="mt-0.5 h-3 w-3 shrink-0 text-accent" />
+							<div className="min-w-0 flex-1">
+								<div className="truncate text-ink-2">{b.source}</div>
+								{b.snippet ? (
+									<div className="mt-0.5 truncate text-ink-3">{b.snippet}</div>
+								) : null}
+							</div>
+						</button>
+					</li>
+				))}
+			</ul>
+		</div>
+	);
+}
+
+function TagChips({ fm }: { fm: Record<string, unknown> }) {
+	const tags = Array.isArray(fm.tags)
+		? (fm.tags as unknown[]).filter((t): t is string => typeof t === "string" && t.length > 0)
+		: [];
+	if (tags.length === 0) return null;
+	return (
+		<div>
+			<div className="font-mono text-2xs uppercase tracking-meta text-ink-4">tags</div>
+			<div className="mt-1 flex flex-wrap gap-1">
+				{tags.map((t) => (
+					<span
+						key={t}
+						className="rounded bg-paper-3 px-1.5 py-0.5 font-mono text-2xs text-ink-2"
+						title="Click-to-filter lands in T-40"
+					>
+						{t}
+					</span>
+				))}
+			</div>
 		</div>
 	);
 }
