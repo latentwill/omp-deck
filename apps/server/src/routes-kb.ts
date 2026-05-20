@@ -105,6 +105,26 @@ export function buildKbRouter(service: KbService): Hono {
 		}
 	});
 
+	app.get("/kb/status", async (c) => {
+		try {
+			const body = await service.getStatus();
+			return c.json(body);
+		} catch (err) {
+			log.error(`getStatus failed`, err);
+			return c.json({ error: String(err) }, 500);
+		}
+	});
+
+	app.post("/kb/init", async (c) => {
+		try {
+			const body = await service.initialize();
+			return c.json(body);
+		} catch (err) {
+			log.error(`initialize failed`, err);
+			return c.json({ error: String(err) }, 500);
+		}
+	});
+
 	return app;
 }
 

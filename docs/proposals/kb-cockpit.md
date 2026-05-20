@@ -228,25 +228,37 @@ are independently valuable. T-39 and T-40 polish the experience.
 - **Live collaborative editing.** Single user, single deck. CRDT /
   multiplayer is out of scope.
 
-## Decisions (locked 2026-05-20)
+## Decisions (locked 2026-05-20, revised 2026-05-20)
 
 1. **Default kb root**: `~/kb` (`C:/Users/bryan/kb` on this machine). Read
    from `OMP_DECK_KB_ROOT`, defaults to `~/kb`.
-2. **Top-level `projects/` excluded by default.** Mixed content + vendor
-   noise (`.venv/`, third-party READMEs); not worth filtering finer.
-   Treated as a top-level skip alongside `.git`, `node_modules`, etc. To
-   include it later, drop a file at `<kb>/.kbinclude-projects` (v2 — not
-   wired in this milestone). Approximate cockpit-visible kb after the
-   exclusion: ~600 files (domains, tools, system, writing, cryptocracy,
-   plus the two root files).
-3. **Editor**: CodeMirror 6, markdown mode + soft-wrap (same surface T-25
-   uses for highlight.js work).
+2. **All top-level directories included by default.** Earlier draft skipped
+   `projects/` because the local kb had vendor noise there; verified the
+   default vendor filters (`.venv`, `node_modules`, `__pycache__`, `dist`,
+   `build`, etc.) already catch the noise — measured: 411 raw projects/ md
+   files filter down to 147 real signal files. The cockpit ships every
+   visible directory the user organized; opinionated curation is not its
+   job. Other users who want to hide subtrees set
+   `OMP_DECK_KB_EXCLUDE_DIRS=<csv>` and restart.
+3. **Editor**: textarea with mono font + soft-wrap for v1 (CodeMirror 6 was
+   the proposal-stated default but is not yet installed; the textarea ships
+   the save loop in zero kb of extra weight and can be swapped to a richer
+   editor as a follow-up without changing the API).
 4. **Atomic-write strategy**: `rename` from temp to target. Single drive
    assumption holds for `~/kb`.
 5. **Unresolved wikilink click**: prompt-to-create with confirmation.
    Default target directory = current file's directory. Stub frontmatter
    pre-filled (`type: knowledge`, today's date in `created`/`updated`).
    User can cancel the prompt to leave the link unresolved.
+6. **Graph node click opens a split-pane preview, not a full-page switch.**
+   The graph stays mounted on the left; the clicked file renders in a
+   ~28rem pane on the right with a close button. Browser-back naturally
+   collapses the preview because URL state is `?view=graph&path=X` →
+   `?view=graph` on back. Mobile keeps the master/detail nav shape.
+7. **Empty-kb setup flow**: when `/api/kb/status` reports `fileCount: 0`,
+   the main pane renders a Welcome panel offering to scaffold a starter
+   `README.md` at the kb root. Replaces the "empty tree, nothing to do"
+   first-run state.
 
 ## References
 

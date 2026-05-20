@@ -47,8 +47,16 @@ import { logger } from "./log.ts";
 const log = logger("kb");
 
 // Top-level (anywhere in the tree) directory names to skip. Mirrors the
-// canonical set in my-org-new/scripts/orphan-census.py, plus the v1-locked
-// projects/ skip per docs/proposals/kb-cockpit.md.
+// canonical set in my-org-new/scripts/orphan-census.py — vendor-noise
+// directories that nobody wants in a knowledge graph. To add your own
+// (e.g. a personal `drafts/` folder, a `private/` subtree), set
+// `OMP_DECK_KB_EXCLUDE_DIRS` to a comma-separated list and restart.
+//
+// The list is intentionally minimal by default: omp-deck shows your kb the
+// way you organized it on disk. If you want to keep a directory out of the
+// cockpit (e.g. it's full of vendor markdown or a checked-in node_modules),
+// either add it to the env override below or rely on the built-in
+// vendor-noise filter (which already catches .venv, node_modules, etc).
 const SKIP_DIR_NAMES = new Set<string>([
 	".git",
 	".github",
@@ -63,8 +71,17 @@ const SKIP_DIR_NAMES = new Set<string>([
 	".nuxt",
 	".idea",
 	".vscode",
-	"projects",
+	...parseExcludeDirsFromEnv(),
 ]);
+
+function parseExcludeDirsFromEnv(): string[] {
+	const raw = process.env.OMP_DECK_KB_EXCLUDE_DIRS;
+	if (!raw) return [];
+	return raw
+		.split(",")
+		.map((s) => s.trim())
+		.filter((s) => s.length > 0);
+}
 
 // Skill-creator and related .agents/skills dirs we don't want surfaced.
 const SKIP_PATH_FRAGMENTS = [".agents/skills"];
@@ -143,6 +160,69 @@ export class KbService {
 	invalidate(): void {
 		this.indexReady = false;
 		this.graphCache = undefined;
+	}
+
+	/**
+	 * Bootstrap status for the welcome panel: does the kb root exist, and
+	 * how many indexed files does it have? An empty/missing kb triggers the
+	 * "Create starter kb" CTA in the web UI.
+	 */
+	async getStatus(): Promise<{ root: string; exists: boolean; fileCount: number }> {
+		await this.ensureIndex();
+		return {
+			root: this.root,
+			exists: existsSync(this.root),
+			fileCount: this.records.length,
+		};
+	}
+
+	/**
+	 * Create the kb root (if missing) and write a starter README.md. Refuses
+	 * to clobber: if the root already has indexed markdown content, the call
+	 * no-ops and returns the existing status. Otherwise scaffolds README.md
+	 * and rebuilds the index so the UI sees it on the next read.
+	 */
+	async initialize(): Promise<{
+		root: string;
+		exists: boolean;
+		fileCount: number;
+		created: boolean;
+		refusedReason?: string;
+	}> {
+		const beforeExists = existsSync(this.root);
+		if (beforeExists) {
+			await this.ensureIndex();
+			if (this.records.length > 0) {
+				return {
+					root: this.root,
+					exists: true,
+					fileCount: this.records.length,
+					created: false,
+					refusedReason: "kb root already has content; init is a no-op",
+				};
+			}
+		}
+
+		try {
+			await mkdir(this.root, { recursive: true });
+		} catch (err) {
+			log.error(`mkdir failed at ${this.root}`, err);
+			throw err;
+		}
+		const readme = path.join(this.root, "README.md");
+		if (!existsSync(readme)) {
+			const today = new Date().toISOString().slice(0, 10);
+			await writeFile(readme, renderStarterReadme(today), "utf8");
+		}
+
+		this.invalidate();
+		await this.ensureIndex();
+		return {
+			root: this.root,
+			exists: true,
+			fileCount: this.records.length,
+			created: true,
+		};
 	}
 
 	/**
@@ -880,6 +960,58 @@ function extractSnippet(body: string, raw: string): string {
 	const from = Math.max(0, lineRelativeIdx - window);
 	const to = Math.min(line.length, lineRelativeIdx + window);
 	return (from > 0 ? "…" : "") + line.slice(from, to) + (to < line.length ? "…" : "");
+}
+
+/**
+ * Initial README rendered when a fresh user runs `init`. Includes the
+ * frontmatter convention so the first file already demonstrates the shape.
+ * The body explains the cockpit's relationship to omp memory + the
+ * progressive-disclosure model so the user has the mental hooks before
+ * they start authoring.
+ */
+function renderStarterReadme(today: string): string {
+	return [
+		"---",
+		"type: knowledge",
+		`created: ${today}`,
+		`updated: ${today}`,
+		"tags: [meta, readme]",
+		"---",
+		"",
+		"# Welcome to your KB",
+		"",
+		"This is a fresh knowledge base, scaffolded by omp-deck. The cockpit reads",
+		"this folder (`~/kb` by default; overridable via `OMP_DECK_KB_ROOT`) as a",
+		"Karpathy-style llm-wiki: hand-tended markdown with frontmatter metadata and",
+		"`[[wiki-links]]` between articles.",
+		"",
+		"## How it works",
+		"",
+		"- **Each file** is a markdown article with YAML frontmatter at the top.",
+		"  The cockpit parses `type`, `created`, `updated`, and `tags` automatically.",
+		"- **Wiki-links** like `[[some-other-file]]` resolve by filename stem. Use",
+		"  `[[dir/path]]` for explicit paths and `[[target|label]]` to rename the",
+		"  rendered text.",
+		"- **Hubs** are index files (e.g. `tools/index.md`) that collect related",
+		"  articles in one place. They keep your wiki from becoming a sea of",
+		"  orphan notes.",
+		"",
+		"## Where to start",
+		"",
+		"1. Drop a file into any subdirectory of this kb. The tree refreshes live.",
+		"2. Reference it from this README with `[[your-new-file]]`.",
+		"3. Open the **Graph** tab to see the constellation grow.",
+		"",
+		"## What this is NOT",
+		"",
+		"This kb is *not* the same as omp's session memory. omp's memory backends",
+		"(`local` rolling summaries, `hindsight` vector store) handle short-term",
+		"recall during a session; this kb is your long-term, hand-tended knowledge.",
+		"They complement each other.",
+		"",
+		"Happy authoring.",
+		"",
+	].join("\n");
 }
 
 export function resolveKbRoot(): string {

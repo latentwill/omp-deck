@@ -27,7 +27,7 @@ import type { KbFileResponse, KbTreeEntry, KbTreeResponse } from "@omp-deck/prot
 
 import { Layout } from "@/components/Layout";
 import { CopyButton } from "@/lib/CopyButton";
-import { kbApi } from "@/lib/kb-api";
+import { kbApi, type KbStatusResponse } from "@/lib/kb-api";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { KbGraphPane } from "./KbGraphPane";
@@ -63,6 +63,26 @@ export function KbView() {
 
 	const kbChangeCounter = useStore((s) => s.kbChangeCounter);
 
+	// Setup detection. An empty/missing kb is a first-run state; we render a
+	// welcome panel inside main instead of an empty tree so a fresh deck doesn't
+	// look broken. Refetched on every kb_changed so the panel disappears the
+	// moment the user creates their first file.
+	const [status, setStatus] = useState<KbStatusResponse | null>(null);
+	useEffect(() => {
+		let cancelled = false;
+		kbApi
+			.status()
+			.then((s) => {
+				if (!cancelled) setStatus(s);
+			})
+			.catch(() => {
+				if (!cancelled) setStatus({ root: "(unknown)", exists: false, fileCount: 0 });
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [kbChangeCounter]);
+
 	// `view` URL param picks between the file-viewer and the force-directed
 	// graph. We default to file; the graph is opt-in via the top-bar toggle.
 	const viewMode: "file" | "graph" = params.get("view") === "graph" ? "graph" : "file";
@@ -82,56 +102,110 @@ export function KbView() {
 			inspector={<KbInspector currentPath={currentPath} kbChangeCounter={kbChangeCounter} />}
 			main={
 				<div className="flex h-full min-h-0 flex-col">
-					<KbTopBar
-						currentPath={currentPath}
-						mobileDetailOpen={mobileDetailOpen}
-						viewMode={viewMode}
-						onViewMode={setViewMode}
-						onBack={() => {
-							setMobileDetailOpen(false);
-							setCurrentPath(undefined);
-						}}
-					/>
-					{viewMode === "graph" ? (
-						<KbGraphPane
-							currentPath={currentPath}
-							onSelect={(p) => {
-								setCurrentPath(p);
-								setViewMode("file");
-								setMobileDetailOpen(true);
+					{status && status.fileCount === 0 ? (
+						<KbWelcome
+							status={status}
+							onInitialized={() => {
+								void kbApi.status().then(setStatus).catch(() => undefined);
 							}}
-							kbChangeCounter={kbChangeCounter}
 						/>
 					) : (
-						<div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
-							<div
-								className={cn(
-									"min-h-0 overflow-y-auto border-line lg:block lg:border-r",
-									mobileDetailOpen ? "hidden" : "block",
-								)}
-							>
-								<KbTree
-									currentPath={currentPath}
-									onSelect={(p) => {
-										setCurrentPath(p);
-										setMobileDetailOpen(true);
-									}}
-									kbChangeCounter={kbChangeCounter}
-								/>
-							</div>
-							<div
-								className={cn(
-									"min-h-0 overflow-y-auto lg:block",
-									mobileDetailOpen ? "block" : "hidden lg:block",
-								)}
-							>
-								{currentPath ? (
-									<KbFilePane path={currentPath} onNavigate={(p) => setCurrentPath(p)} kbChangeCounter={kbChangeCounter} />
-								) : (
-									<KbEmpty />
-								)}
-							</div>
-						</div>
+						<>
+							<KbTopBar
+								currentPath={currentPath}
+								mobileDetailOpen={mobileDetailOpen}
+								viewMode={viewMode}
+								onViewMode={setViewMode}
+								onBack={() => {
+									setMobileDetailOpen(false);
+									setCurrentPath(undefined);
+								}}
+							/>
+							{viewMode === "graph" ? (
+								<div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)]">
+									<div
+										className={cn(
+											"min-h-0 lg:block",
+											currentPath && mobileDetailOpen ? "hidden" : "block",
+										)}
+									>
+										<KbGraphPane
+											currentPath={currentPath}
+											onSelect={(p) => {
+												// Stay in graph mode; only update `path` so the file
+												// opens in the right preview pane and the graph stays
+												// visible. Browser-back collapses the preview
+												// (URL: ?view=graph&path=X → ?view=graph).
+												const next = new URLSearchParams(params);
+												next.set("path", p);
+												next.set("view", "graph");
+												setParams(next, { replace: false });
+												setMobileDetailOpen(true);
+											}}
+											kbChangeCounter={kbChangeCounter}
+										/>
+									</div>
+									<div
+										className={cn(
+											"min-h-0 overflow-y-auto border-line lg:block lg:border-l",
+											currentPath && mobileDetailOpen ? "block" : "hidden lg:block",
+										)}
+									>
+										{currentPath ? (
+											<KbFilePane
+												path={currentPath}
+												onNavigate={(p) => {
+													const next = new URLSearchParams(params);
+													next.set("path", p);
+													next.set("view", "graph");
+													setParams(next, { replace: false });
+												}}
+												onClose={() => {
+													const next = new URLSearchParams(params);
+													next.delete("path");
+													next.set("view", "graph");
+													setParams(next, { replace: false });
+													setMobileDetailOpen(false);
+												}}
+												kbChangeCounter={kbChangeCounter}
+											/>
+										) : (
+											<GraphPreviewEmpty />
+										)}
+									</div>
+								</div>
+							) : (
+								<div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
+									<div
+										className={cn(
+											"min-h-0 overflow-y-auto border-line lg:block lg:border-r",
+											mobileDetailOpen ? "hidden" : "block",
+										)}
+									>
+										<KbTree
+											currentPath={currentPath}
+											onSelect={(p) => {
+												setCurrentPath(p);
+												setMobileDetailOpen(true);
+											}}
+											kbChangeCounter={kbChangeCounter}
+										/>
+									</div>
+									<div
+										className={cn(
+											"min-h-0 overflow-y-auto lg:block",
+											mobileDetailOpen ? "block" : "hidden lg:block",
+										)}
+									>
+										{currentPath ? (
+											<KbFilePane path={currentPath} onNavigate={(p) => setCurrentPath(p)} kbChangeCounter={kbChangeCounter} />
+										) : (
+											<KbEmpty />
+										)}
+									</div>
+								</div>
+							)}
+						</>
 					)}
 				</div>
 			}
@@ -207,6 +281,94 @@ function KbEmpty() {
 			<div className="mt-1 max-w-sm text-xs text-ink-3">
 				The KB cockpit reads your wiki at <span className="font-mono text-ink-2">~/kb</span>. Top-level
 				<span className="font-mono"> projects/</span> is excluded by default.
+			</div>
+		</div>
+	);
+}
+
+function GraphPreviewEmpty() {
+	return (
+		<div className="flex h-full flex-col items-center justify-center px-6 py-10 text-center">
+			<Network className="h-5 w-5 text-ink-4" />
+			<div className="mt-3 text-sm text-ink-2">Click a node</div>
+			<div className="mt-1 max-w-xs text-xs text-ink-3">
+				The file opens here. The graph stays put so you can keep exploring.
+			</div>
+		</div>
+	);
+}
+
+function KbWelcome({
+	status,
+	onInitialized,
+}: {
+	status: KbStatusResponse;
+	onInitialized: () => void;
+}) {
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string | undefined>();
+	const onCreate = useCallback(async () => {
+		setBusy(true);
+		setError(undefined);
+		try {
+			const res = await kbApi.init();
+			if (res.refusedReason) {
+				setError(res.refusedReason);
+			}
+			onInitialized();
+		} catch (e) {
+			setError(String((e as Error).message ?? e));
+		} finally {
+			setBusy(false);
+		}
+	}, [onInitialized]);
+	return (
+		<div className="flex h-full min-h-0 flex-col items-center justify-center px-6 py-10">
+			<div className="max-w-lg text-left">
+				<div className="flex items-center gap-2">
+					<BookOpen className="h-5 w-5 text-accent" />
+					<h1 className="text-base font-medium text-ink">Set up your knowledge base</h1>
+				</div>
+				<p className="mt-3 text-sm text-ink-2">
+					omp-deck reads a Karpathy-style llm-wiki from a single folder on disk. The cockpit
+					is currently pointed at{" "}
+					<span className="break-all font-mono text-ink">{status.root}</span>
+					{status.exists ? " (which is empty)" : " (which doesn't exist yet)"}.
+				</p>
+				<p className="mt-2 text-sm text-ink-3">
+					Click below to scaffold a starter <span className="font-mono">README.md</span> at
+					that location. From there you can drop in your own markdown files; the tree, the
+					graph, and the file pane all refresh live as you add content.
+				</p>
+				<div className="mt-5 flex items-center gap-3">
+					<button
+						type="button"
+						onClick={() => void onCreate()}
+						disabled={busy}
+						className="btn-primary inline-flex h-9 items-center gap-2 rounded-md bg-accent px-3 text-sm font-medium text-paper transition-opacity disabled:opacity-60"
+					>
+						{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FilePlus className="h-3.5 w-3.5" />}
+						Create starter README
+					</button>
+					<span className="text-2xs text-ink-3">
+						Or set <span className="font-mono text-ink-2">OMP_DECK_KB_ROOT</span> and restart the deck.
+					</span>
+				</div>
+				{error ? (
+					<div className="mt-3 rounded-md border border-warn/30 bg-warn/10 px-3 py-2 font-mono text-2xs text-warn">
+						{error}
+					</div>
+				) : null}
+				<div className="mt-6 border-t border-line pt-4 text-xs text-ink-3">
+					<div className="font-mono text-2xs uppercase tracking-meta text-ink-4">
+						What this is NOT
+					</div>
+					<p className="mt-1">
+						This kb is separate from omp's <span className="font-mono">memory.backend</span>{" "}
+						(rolling session summaries / vector recall). The kb is your hand-tended,
+						long-term notes; omp memory is short-term session context.
+					</p>
+				</div>
 			</div>
 		</div>
 	);
@@ -413,10 +575,12 @@ function TreeFile({
 function KbFilePane({
 	path,
 	onNavigate,
+	onClose,
 	kbChangeCounter,
 }: {
 	path: string;
 	onNavigate: (p: string) => void;
+	onClose?: () => void;
 	kbChangeCounter: number;
 }) {
 	const [file, setFile] = useState<KbFileResponse | null>(null);
@@ -573,15 +737,28 @@ function KbFilePane({
 								</button>
 							</>
 						) : (
-							<button
-								type="button"
-								onClick={startEdit}
-								className="btn-ghost inline-flex h-7 items-center gap-1 px-2 text-xs"
-								title="Edit (or click anywhere in the body)"
-							>
-								<Pencil className="h-3.5 w-3.5" />
-								Edit
-							</button>
+							<>
+								<button
+									type="button"
+									onClick={startEdit}
+									className="btn-ghost inline-flex h-7 items-center gap-1 px-2 text-xs"
+									title="Edit (or click anywhere in the body)"
+								>
+									<Pencil className="h-3.5 w-3.5" />
+									Edit
+								</button>
+								{onClose ? (
+									<button
+										type="button"
+										onClick={onClose}
+										className="btn-ghost inline-flex h-7 w-7 items-center justify-center p-0 text-ink-3 hover:text-ink"
+										title="Close preview"
+										aria-label="Close preview"
+									>
+										<X className="h-3.5 w-3.5" />
+									</button>
+								) : null}
+							</>
 						)}
 					</div>
 				</div>

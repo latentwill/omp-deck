@@ -53,4 +53,22 @@ export const kbApi = {
 	backlinks(path: string): Promise<KbBacklinksResponse> {
 		return req<KbBacklinksResponse>(`/kb/backlinks${qs({ path })}`);
 	},
+	status(): Promise<KbStatusResponse> {
+		return req<KbStatusResponse>("/kb/status");
+	},
+	init(): Promise<KbInitResponse> {
+		return req<KbInitResponse>("/kb/init", { method: "POST" });
+	},
 };
+
+// Lightweight local types so we don't need to round-trip through the protocol
+// package just for two endpoints used only by the welcome panel.
+export interface KbStatusResponse {
+	root: string;
+	exists: boolean;
+	fileCount: number;
+}
+export interface KbInitResponse extends KbStatusResponse {
+	created: boolean;
+	refusedReason?: string;
+}
