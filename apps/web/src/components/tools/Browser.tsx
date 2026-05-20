@@ -1,5 +1,6 @@
 import type { ToolRendererProps } from "./ToolCallCard";
-import { ArgRow, Pre, extractResultText } from "./shared";
+import { ArgRow, extractResultText } from "./shared";
+import { MaybeJsonBlock } from "@/lib/code";
 
 export function BrowserTool({ args, stream }: ToolRendererProps) {
 	const action = String((args.action as string | undefined) ?? "");
@@ -24,7 +25,7 @@ export function BrowserTool({ args, stream }: ToolRendererProps) {
 					className="max-h-96 rounded border border-line"
 				/>
 			) : null}
-			{text ? <Pre>{text}</Pre> : null}
+			{text ? <MaybeJsonBlock text={text} /> : null}
 		</div>
 	);
 }

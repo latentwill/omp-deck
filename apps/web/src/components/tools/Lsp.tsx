@@ -1,5 +1,6 @@
 import type { ToolRendererProps } from "./ToolCallCard";
-import { ArgRow, PathChip, Pre, extractResultText } from "./shared";
+import { ArgRow, PathChip, extractResultText } from "./shared";
+import { MaybeJsonBlock } from "@/lib/code";
 import { shortPath } from "@/lib/utils";
 
 export function LspTool({ args, stream }: ToolRendererProps) {
@@ -18,7 +19,7 @@ export function LspTool({ args, stream }: ToolRendererProps) {
 				{query ? <span className="text-ink-3">{query}</span> : null}
 			</div>
 			{file ? <ArgRow k="file" v={<PathChip>{shortPath(file, 72)}</PathChip>} /> : null}
-			{text ? <Pre>{text}</Pre> : null}
+			{text ? <MaybeJsonBlock text={text} /> : null}
 		</div>
 	);
 }

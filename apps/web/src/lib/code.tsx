@@ -16,6 +16,28 @@ import hljs from "highlight.js/lib/common";
 import { cn } from "./utils";
 import { CopyButton } from "./CopyButton";
 
+/**
+ * Cap on the input size we'll pass through highlight.js. Above this the cost
+ * of regex-based highlighting blocks the main thread long enough to be felt
+ * — and very large blobs are almost always logs/data rather than code anyway.
+ * Tune by feel; 256 KB covers the largest real-world tool outputs I've seen.
+ */
+const MAX_HIGHLIGHT_BYTES = 256 * 1024;
+
+/**
+ * Sniff for binary content by checking for NUL bytes in the first 1 KB.
+ * Cheap, correct for text vs. compiled artifacts; mis-classifies UTF-16
+ * (rare in tool outputs) but the consequence is just falling back to a
+ * plain pre, which is the safe default.
+ */
+function looksBinary(s: string): boolean {
+	const limit = Math.min(s.length, 1024);
+	for (let i = 0; i < limit; i++) {
+		if (s.charCodeAt(i) === 0) return true;
+	}
+	return false;
+}
+
 interface Props {
 	code: string;
 	language?: string;
@@ -25,9 +47,11 @@ interface Props {
 }
 
 export function CodeBlock({ code, language, className, dedent }: Props) {
+	const text = dedent ? stripCommonIndent(code) : code;
+	const oversized = text.length > MAX_HIGHLIGHT_BYTES;
+	const binary = !oversized && looksBinary(text);
 	const html = useMemo(() => {
-		const text = dedent ? stripCommonIndent(code) : code;
-		if (!text) return "";
+		if (!text || oversized || binary) return "";
 		try {
 			const lang = language ? normalizeLang(language) : undefined;
 			if (lang && hljs.getLanguage(lang)) {
@@ -37,16 +61,31 @@ export function CodeBlock({ code, language, className, dedent }: Props) {
 		} catch {
 			return escapeHtml(text);
 		}
-	}, [code, language, dedent]);
+	}, [text, language, oversized, binary]);
+
+	const preClass = cn(
+		"max-h-72 overflow-auto border-y border-line bg-paper-code px-4 py-3 font-mono text-2xs leading-relaxed",
+		className,
+	);
+
+	if (oversized || binary) {
+		const banner = binary
+			? `Binary content (${text.length.toLocaleString()} bytes) — highlighting skipped`
+			: `Output too large to highlight (${(text.length / 1024).toFixed(0)} KB)`;
+		return (
+			<div className="group relative">
+				<pre className={preClass}>
+					<div className="mb-1 select-none text-ink-3">{banner}</div>
+					<code>{binary ? "[binary]" : text}</code>
+				</pre>
+				<CopyButton text={text} />
+			</div>
+		);
+	}
 
 	return (
 		<div className="group relative">
-			<pre
-				className={cn(
-					"max-h-72 overflow-auto border-y border-line bg-paper-code px-4 py-3 font-mono text-2xs leading-relaxed",
-					className,
-				)}
-			>
+			<pre className={preClass}>
 				<code
 					className={cn("hljs", language ? `language-${normalizeLang(language)}` : undefined)}
 					// hljs.highlight returns sanitized HTML keyed to its own class names.
@@ -54,7 +93,51 @@ export function CodeBlock({ code, language, className, dedent }: Props) {
 					dangerouslySetInnerHTML={{ __html: html }}
 				/>
 			</pre>
-			<CopyButton text={dedent ? stripCommonIndent(code) : code} />
+			<CopyButton text={text} />
+		</div>
+	);
+}
+
+/**
+ * Render JSON-shaped text with syntax highlighting; fall back to a plain
+ * monospace block when the input doesn't parse as JSON. Use for tool surfaces
+ * (Bash stdout, Eval output, generic Browser/Task results) where the payload
+ * is *often* JSON but not guaranteed and we don't want to mangle plain text.
+ *
+ * The heuristic is intentionally cheap: cheapest test first (first non-space
+ * char must be `{` or `[`), then a single `JSON.parse`. The `try/catch`
+ * swallows partial streams and JS-object literals that look JSON-ish but
+ * aren't ({a: 1} with unquoted keys, trailing commas, etc.).
+ */
+export function MaybeJsonBlock({ text, className }: { text: string; className?: string }) {
+	const first = text.trimStart().charAt(0);
+	if (first !== "{" && first !== "[") {
+		return <PlainBlock text={text} className={className} />;
+	}
+	try {
+		const pretty = JSON.stringify(JSON.parse(text), null, 2);
+		return <CodeBlock code={pretty} language="json" className={className} />;
+	} catch {
+		return <PlainBlock text={text} className={className} />;
+	}
+}
+
+/**
+ * Plain monospace block — visual match for `Pre` in `tools/shared.tsx`,
+ * inlined here to keep `lib/` free of dependencies on `components/`.
+ */
+export function PlainBlock({ text, className }: { text: string; className?: string }) {
+	return (
+		<div className="group relative">
+			<pre
+				className={cn(
+					"max-h-72 overflow-auto whitespace-pre-wrap break-words bg-paper-code border-y border-line px-4 py-3 font-mono text-2xs leading-relaxed text-ink",
+					className,
+				)}
+			>
+				{text}
+			</pre>
+			<CopyButton text={text} />
 		</div>
 	);
 }

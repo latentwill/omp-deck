@@ -1,5 +1,6 @@
 import type { ToolRendererProps } from "./ToolCallCard";
-import { Pre, extractResultText } from "./shared";
+import { extractResultText } from "./shared";
+import { MaybeJsonBlock } from "@/lib/code";
 import { formatCost, formatDurationMs, truncate, cn } from "@/lib/utils";
 
 const STATUS_TONE: Record<string, string> = {
@@ -55,7 +56,7 @@ export function TaskTool({ args, stream }: ToolRendererProps) {
 						findings
 					</summary>
 					<div className="mt-1">
-						<Pre>{extractResultText(result)}</Pre>
+						<MaybeJsonBlock text={extractResultText(result)} />
 					</div>
 				</details>
 			) : null}

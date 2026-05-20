@@ -1,6 +1,6 @@
 import type { ToolRendererProps } from "./ToolCallCard";
-import { ArgRow, Pre, extractResultText } from "./shared";
-import { CodeBlock } from "@/lib/code";
+import { ArgRow, extractResultText } from "./shared";
+import { CodeBlock, MaybeJsonBlock } from "@/lib/code";
 import { shortPath } from "@/lib/utils";
 
 export function BashTool({ args, stream }: ToolRendererProps) {
@@ -24,7 +24,7 @@ export function BashTool({ args, stream }: ToolRendererProps) {
 			{cwd ? <ArgRow k="cwd" v={shortPath(cwd, 60)} /> : null}
 			{timeout ? <ArgRow k="timeout" v={`${timeout}s`} /> : null}
 			{exitCode !== undefined ? <ArgRow k="exit" v={String(exitCode)} /> : null}
-			{text ? <Pre>{text}</Pre> : null}
+			{text ? <MaybeJsonBlock text={text} /> : null}
 		</div>
 	);
 }

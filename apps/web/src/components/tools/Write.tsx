@@ -1,5 +1,6 @@
 import type { ToolRendererProps } from "./ToolCallCard";
-import { ArgRow, PathChip, Pre, extractResultText, SectionLabel } from "./shared";
+import { ArgRow, PathChip, extractResultText, SectionLabel } from "./shared";
+import { CodeBlock, detectLangFromPath } from "@/lib/code";
 import { formatBytes, shortPath } from "@/lib/utils";
 
 export function WriteTool({ args, stream }: ToolRendererProps) {
@@ -9,6 +10,7 @@ export function WriteTool({ args, stream }: ToolRendererProps) {
 	const result = stream?.result;
 	const resultText = result ? extractResultText(result) : "";
 	const lineCount = content.split(/\r?\n/).length;
+	const language = detectLangFromPath(path);
 
 	return (
 		<div className="space-y-1.5">
@@ -20,7 +22,7 @@ export function WriteTool({ args, stream }: ToolRendererProps) {
 						body
 					</summary>
 					<div className="mt-1">
-						<Pre>{content}</Pre>
+						<CodeBlock code={content} language={language} />
 					</div>
 				</details>
 			) : null}

@@ -1,11 +1,13 @@
 import type { ToolRendererProps } from "./ToolCallCard";
 import { ResultImages, extractResultText } from "./shared";
-import { CopyButton } from "@/lib/CopyButton";
+import { CodeBlock, MaybeJsonBlock } from "@/lib/code";
 
 export function GenericTool({ args, stream }: ToolRendererProps) {
 	const result = stream?.result;
 	const partial = stream?.partialResult;
 	const text = result ? extractResultText(result) : partial ? extractResultText(partial) : "";
+	// Args are always a structured object at this protocol boundary — render
+	// as JSON so keys/strings/numbers colorize. Pretty-print for readability.
 	const argsText = JSON.stringify(args, null, 2);
 
 	return (
@@ -14,11 +16,8 @@ export function GenericTool({ args, stream }: ToolRendererProps) {
 				<summary className="cursor-pointer font-mono text-2xs uppercase tracking-meta text-ink-3 hover:text-ink">
 					args
 				</summary>
-				<div className="group relative mt-1">
-					<pre className="max-h-48 overflow-auto bg-paper-code border-y border-line px-4 py-3 font-mono text-2xs leading-relaxed text-ink">
-						{argsText}
-					</pre>
-					<CopyButton text={argsText} />
+				<div className="mt-1">
+					<CodeBlock code={argsText} language="json" className="max-h-48" />
 				</div>
 			</details>
 			{/* Render image blocks first — they're the headline output when a tool
@@ -29,11 +28,11 @@ export function GenericTool({ args, stream }: ToolRendererProps) {
 					<summary className="cursor-pointer font-mono text-2xs uppercase tracking-meta text-ink-3 hover:text-ink">
 						{result ? "result" : "partial"}
 					</summary>
-					<div className="group relative mt-1">
-						<pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words bg-paper-code border-y border-line px-4 py-3 font-mono text-2xs leading-relaxed text-ink">
-							{text}
-						</pre>
-						<CopyButton text={text} />
+					<div className="mt-1">
+						{/* Tool results are commonly JSON (extractResultText falls back to
+						    JSON.stringify on object payloads) but not guaranteed —
+						    MaybeJsonBlock highlights when parseable, plain otherwise. */}
+						<MaybeJsonBlock text={text} className="max-h-64" />
 					</div>
 				</details>
 			) : null}

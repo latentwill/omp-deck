@@ -1,6 +1,6 @@
 import type { ToolRendererProps } from "./ToolCallCard";
-import { Pre, extractResultText } from "./shared";
-import { CodeBlock } from "@/lib/code";
+import { extractResultText } from "./shared";
+import { CodeBlock, MaybeJsonBlock } from "@/lib/code";
 
 interface Cell {
 	language?: string;
@@ -43,7 +43,7 @@ export function EvalTool({ args, stream }: ToolRendererProps) {
 						output
 					</summary>
 					<div className="mt-1">
-						<Pre>{text}</Pre>
+						<MaybeJsonBlock text={text} />
 					</div>
 				</details>
 			) : null}
