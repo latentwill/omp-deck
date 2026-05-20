@@ -160,6 +160,8 @@ Full diagram in [docs/architecture.md](./docs/architecture.md).
   builtins, user/project markdown commands.
 - [Marketplaces](./docs/marketplaces.md) — catalog seeding, install
   semantics, capability badges.
+- [Skills](./docs/skills.md) — `/skills` view, plugin→skill hierarchy, scope
+  semantics, live refresh, REST surface.
 - [Telegram bridge](./docs/telegram.md) — DM-driven agent from your phone.
 - [Themes](./docs/themes.md) — Paper / Slate / adding more.
 - [Start command template](./docs/start-command-template.md) — define
