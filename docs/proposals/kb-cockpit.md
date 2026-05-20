@@ -1,6 +1,6 @@
 # Proposal: KB Cockpit
 
-Status: draft, 2026-05-20
+Status: approved 2026-05-20 (decisions locked, see end)
 Author: omp-deck team
 Tracks: T-33 (this proposal) — T-41 (deferred maintenance hook). Implements
 [Karpathy's llm-wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)
@@ -105,7 +105,8 @@ Hardcoded skip-set (matches `orphan-census.py`):
 
 ```
 .git, node_modules, target, .venv, venv, __pycache__, dist, build,
-.next, .nuxt, .agents/skills
+.next, .nuxt, .agents/skills,
+projects                          # top-level — see Decisions below
 ```
 
 Future: `.kbignore` file at any subdir level (gitignore-style). Out of v1.
@@ -227,22 +228,25 @@ are independently valuable. T-39 and T-40 polish the experience.
 - **Live collaborative editing.** Single user, single deck. CRDT /
   multiplayer is out of scope.
 
-## Open questions for the user
+## Decisions (locked 2026-05-20)
 
-1. **Default kb root**: confirm `~/kb` (i.e. `C:/Users/bryan/kb`) for
-   your machine. The proposal currently reads it from `OMP_DECK_KB_ROOT`
-   with that default.
-2. **Editor surface**: CodeMirror 6 with markdown + soft-wrap matches the
-   existing deck CodeMirror usage. OK?
-3. **Atomic write strategy on Windows**: `cp temp dst` then `rm temp` vs.
-   `rename` — `rename` is atomic but fails across drive letters. The kb
-   should always be on a single drive, so `rename` should work. Confirm.
-4. **Wikilink-create-on-click**: when a user clicks an unresolved
-   `[[name]]`, should the cockpit prompt to create the file (T-39's
-   "create affordance")? Or just show the unresolved state? Tentative
-   answer: yes-prompt, but the prompt asks for a target directory
-   (defaulting to the current file's directory) so we don't blindly
-   write into the root.
+1. **Default kb root**: `~/kb` (`C:/Users/bryan/kb` on this machine). Read
+   from `OMP_DECK_KB_ROOT`, defaults to `~/kb`.
+2. **Top-level `projects/` excluded by default.** Mixed content + vendor
+   noise (`.venv/`, third-party READMEs); not worth filtering finer.
+   Treated as a top-level skip alongside `.git`, `node_modules`, etc. To
+   include it later, drop a file at `<kb>/.kbinclude-projects` (v2 — not
+   wired in this milestone). Approximate cockpit-visible kb after the
+   exclusion: ~600 files (domains, tools, system, writing, cryptocracy,
+   plus the two root files).
+3. **Editor**: CodeMirror 6, markdown mode + soft-wrap (same surface T-25
+   uses for highlight.js work).
+4. **Atomic-write strategy**: `rename` from temp to target. Single drive
+   assumption holds for `~/kb`.
+5. **Unresolved wikilink click**: prompt-to-create with confirmation.
+   Default target directory = current file's directory. Stub frontmatter
+   pre-filled (`type: knowledge`, today's date in `created`/`updated`).
+   User can cancel the prompt to leave the link unresolved.
 
 ## References
 
