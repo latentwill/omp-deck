@@ -25,11 +25,13 @@ import { buildFsRouter } from "./routes-fs.ts";
 import { buildBridgesRouter } from "./routes-bridges.ts";
 import { buildMarketplaceRouter } from "./routes-marketplace.ts";
 import { buildSkillsRouter } from "./routes-skills.ts";
+import { buildKbRouter } from "./routes-kb.ts";
 import { buildAuthOAuthRouter } from "./routes-auth-oauth.ts";
 import type { RoutinesRunner } from "./routines-runner.ts";
 import type { BridgeSupervisor } from "./bridge-supervisor.ts";
 import type { MarketplaceService } from "./marketplace-service.ts";
 import type { SkillsService } from "./skills-service.ts";
+import type { KbService } from "./kb-service.ts";
 
 export function buildRouter(
 	bridge: AgentBridge,
@@ -38,6 +40,7 @@ export function buildRouter(
 	supervisor: BridgeSupervisor,
 	marketplace: MarketplaceService,
 	skills: SkillsService,
+	kb: KbService,
 	opts: { restartServer?: () => RestartServerResponse } = {},
 ): Hono {
 	const app = new Hono();
@@ -224,6 +227,7 @@ export function buildRouter(
 	app.route("/", buildBridgesRouter(supervisor));
 	app.route("/", buildMarketplaceRouter(marketplace));
 	app.route("/", buildSkillsRouter(skills));
+	app.route("/", buildKbRouter(kb));
 	app.route("/auth/oauth", buildAuthOAuthRouter());
 
 	return app;

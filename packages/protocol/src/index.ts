@@ -324,6 +324,75 @@ export interface ListSkillsResponse {
 	skills: SkillSummary[];
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Knowledge Base (Karpathy-style llm-wiki viewer over ~/kb)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One entry in a KB tree listing. `path` is always forward-slash separated
+ * and rooted at the KB root (e.g. "tools/tauri-knowledge-hub.md"). For dirs
+ * `mdCount` includes recursive markdown count after exclude rules.
+ */
+export interface KbTreeEntry {
+	name: string;
+	path: string;
+	kind: "file" | "dir";
+	/** Bytes; omitted for directories. */
+	size?: number;
+	/** ISO timestamp; omitted for directories. */
+	mtime?: string;
+	/** Recursive markdown count, dirs only. */
+	mdCount?: number;
+	/** True when this entry is a symlink/junction (e.g. cryptocracy). */
+	symlink?: boolean;
+}
+
+export interface KbTreeResponse {
+	/** The requested directory's relative path; empty for root. */
+	path: string;
+	dirs: KbTreeEntry[];
+	files: KbTreeEntry[];
+}
+
+/**
+ * One parsed wikilink from a SKILL/article body. `resolved` is the relative
+ * path of the matching file (forward-slash), or null when no file matches
+ * the target's stem or subpath. `anchor` carries any `#section` portion.
+ */
+export interface KbWikilink {
+	/** Verbatim text inside `[[…]]`, including label and anchor parts. */
+	raw: string;
+	/** The target without label/anchor — what was used to resolve. */
+	target: string;
+	/** Render label (`[[target|label]]` — defaults to `target`). */
+	label: string;
+	/** Anchor portion (`[[target#anchor]]`) — null if absent. */
+	anchor: string | null;
+	/** Resolved kb-relative path with forward slashes, or null. */
+	resolved: string | null;
+	/** Reason resolution failed when `resolved === null`. */
+	unresolvedReason?: "no-match" | "ambiguous-stem" | "outside-kb";
+}
+
+export interface KbFileResponse {
+	/** Forward-slash relative path from kb root. */
+	path: string;
+	/** Absolute disk path; opaque to clients but useful for inspector. */
+	absolutePath: string;
+	/** Parsed YAML frontmatter (empty when absent or invalid). */
+	frontmatter: Record<string, unknown>;
+	/** Frontmatter parser warning when `---` block was malformed YAML. */
+	frontmatterError?: string;
+	/** SKILL.md / article body with frontmatter stripped. */
+	body: string;
+	/** Outgoing wikilinks, in order of appearance. */
+	outgoingLinks: KbWikilink[];
+	/** File size in bytes. */
+	size: number;
+	/** ISO timestamp. */
+	mtime: string;
+}
+
 /**
  * Co-located file under a skill's directory. Listed recursively (depth-first)
  * with `relPath` carrying the path from the skill dir; the UI groups by
@@ -437,6 +506,8 @@ export type ServerFrame =
 	| { type: "tasks_changed" }
 	/** Broadcast frame: skill catalog or enabled-state changed. Clients refetch. */
 	| { type: "skills_changed" }
+	/** Broadcast frame: any KB file under the watched root mutated. Clients refetch. */
+	| { type: "kb_changed" }
 	/** OAuth: SDK has produced the consent URL; client opens it in a new tab. */
 	| {
 			type: "oauth_consent";

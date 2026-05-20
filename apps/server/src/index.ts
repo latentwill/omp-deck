@@ -19,6 +19,8 @@ import { WsHub, type ConnectionData } from "./ws.ts";
 import { MarketplaceService } from "./marketplace-service.ts";
 import { SkillsService } from "./skills-service.ts";
 import { startSkillsWatcher } from "./skills-watcher.ts";
+import { KbService, resolveKbRoot } from "./kb-service.ts";
+import { startKbWatcher } from "./kb-watcher.ts";
 import { installStarterSkills } from "./starter-skills.ts";
 import { buildDefaultBridgeSupervisor } from "./bridge-supervisor.ts";
 import type { RestartServerResponse } from "@omp-deck/protocol";
@@ -52,6 +54,7 @@ async function main(): Promise<void> {
 	const supervisor = buildDefaultBridgeSupervisor();
 	const marketplaceService = new MarketplaceService();
 	const skillsService = new SkillsService(config, marketplaceService);
+	const kbService = new KbService({ root: resolveKbRoot() });
 	const router = buildRouter(
 		bridge,
 		config,
@@ -59,9 +62,11 @@ async function main(): Promise<void> {
 		supervisor,
 		marketplaceService,
 		skillsService,
+		kbService,
 		{ restartServer: () => scheduleRestart(server) },
 	);
 	const skillsWatcherDispose = startSkillsWatcher(config);
+	const kbWatcherDispose = startKbWatcher(kbService);
 	const ws = new WsHub(bridge);
 
 	server = Bun.serve<ConnectionData>({
@@ -128,6 +133,11 @@ async function main(): Promise<void> {
 			skillsWatcherDispose();
 		} catch (err) {
 			log.error(`skills watcher dispose threw`, err);
+		}
+		try {
+			kbWatcherDispose();
+		} catch (err) {
+			log.error(`kb watcher dispose threw`, err);
 		}
 		try {
 			await supervisor.shutdown();
