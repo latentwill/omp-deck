@@ -5,6 +5,8 @@ import {
 	settings as ompSettings,
 	type AgentSession,
 } from "@oh-my-pi/pi-coding-agent";
+import { runExtensionCompact, runExtensionSetModel } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/compact-handler";
+import { getSessionSlashCommands } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/get-commands-handler";
 // `Model` is owned by `@oh-my-pi/pi-ai`, a transitive dep we don't bring in
 // directly. Treat it as opaque at the bridge boundary — we only ever pass it
 // back into the SDK's own methods.
@@ -147,6 +149,15 @@ export class InProcessAgentBridge implements AgentBridge {
 		});
 
 		const session = result.session;
+		const ext = result.extensionsResult;
+		log.info(
+			`createAgentSession: ${ext?.extensions?.length ?? 0} extensions loaded, ${ext?.errors?.length ?? 0} errors`,
+			ext?.errors?.length ? ext.errors : undefined,
+		);
+		if (ext?.extensions?.length) {
+			log.info(`extension paths: ${ext.extensions.map(e => (e as { path?: string }).path ?? "<unknown>").join(" | ")}`);
+		}
+		await this.wireExtensionRunner(session);
 		const handle = this.attach(session, opts.cwd, sessionManager);
 		if (!opts.suppressAutoStart && this.autoStartCommand) {
 			this.pendingAutoPrompts.set(handle.sessionId, this.autoStartCommand);
@@ -169,6 +180,7 @@ export class InProcessAgentBridge implements AgentBridge {
 		});
 		const session = result.session;
 		const handle = this.attach(session, cwd, sessionManager);
+		await this.wireExtensionRunner(session);
 		log.info(`resumed session ${handle.sessionId} from ${opts.sessionPath}`);
 		return handle;
 	}
@@ -298,6 +310,102 @@ export class InProcessAgentBridge implements AgentBridge {
 				a.handle.dispose().catch((err) => log.warn(`reap dispose failed`, err)),
 			),
 		);
+	}
+
+	/**
+	 * Wire session-bound callbacks into the session's ExtensionRunner so the
+	 * lifecycle events fire and `pi.sendUserMessage` etc. reach the right
+	 * session. `createAgentSession` does extension *discovery* + runner
+	 * construction internally; the embedder is responsible for installing
+	 * the per-session callbacks afterward (mirrors task/executor.ts and
+	 * modes/acp/acp-agent.ts). Without this, loaded extensions are inert.
+	 */
+	private async wireExtensionRunner(session: AgentSession): Promise<void> {
+		const runner = (session as unknown as { extensionRunner?: unknown }).extensionRunner as
+			| {
+					initialize: (actions: unknown, contextActions: unknown) => void;
+					emit: (event: { type: string }) => Promise<void> | void;
+					onError: (h: (e: { extensionPath?: string; error: unknown }) => void) => void;
+			  }
+			| undefined;
+		if (!runner) return;
+
+		const s = session as unknown as {
+			sendCustomMessage: (msg: unknown, opts?: unknown) => Promise<void>;
+			sendUserMessage: (content: unknown, opts?: unknown) => Promise<void>;
+			sessionManager: {
+				appendCustomEntry: (customType: string, data?: unknown) => string;
+				appendLabelChange: (targetId: string, label: string) => void;
+				getSessionName: () => string | undefined;
+				setSessionName: (name: string, source: string) => Promise<void>;
+			};
+			getActiveToolNames: () => string[];
+			getAllToolNames: () => string[];
+			setActiveToolsByName: (names: string[]) => void;
+			setModel: (model: unknown) => Promise<void>;
+			modelRegistry: { getApiKey: (m: unknown) => Promise<string | undefined> };
+			model: unknown;
+			thinkingLevel: unknown;
+			setThinkingLevel: (l: unknown) => void;
+			isStreaming: boolean;
+			abort: () => void;
+			queuedMessageCount: number;
+			getContextUsage: () => unknown;
+			systemPrompt: unknown;
+		};
+
+		const actions = {
+			sendMessage: (message: unknown, options?: unknown) => {
+				s.sendCustomMessage(message, options).catch((err: unknown) => {
+					log.warn(`extension sendMessage failed`, err);
+				});
+			},
+			sendUserMessage: (content: unknown, options?: unknown) => {
+				s.sendUserMessage(content, options).catch((err: unknown) => {
+					log.warn(`extension sendUserMessage failed`, err);
+				});
+			},
+			appendEntry: (customType: string, data?: unknown) => {
+				return s.sessionManager.appendCustomEntry(customType, data);
+			},
+			setLabel: (targetId: string, label: string) => {
+				s.sessionManager.appendLabelChange(targetId, label);
+			},
+			getActiveTools: () => s.getActiveToolNames(),
+			getAllTools: () => s.getAllToolNames(),
+			setActiveTools: (toolNames: string[]) => s.setActiveToolsByName(toolNames),
+			getCommands: () => getSessionSlashCommands(s as never),
+			setModel: (model: unknown) => runExtensionSetModel(s as never, model as never),
+			getThinkingLevel: () => s.thinkingLevel,
+			setThinkingLevel: (level: unknown) => s.setThinkingLevel(level),
+			getSessionName: () => s.sessionManager.getSessionName(),
+			setSessionName: async (name: string) => {
+				await s.sessionManager.setSessionName(name, "user");
+			},
+		};
+
+		const contextActions = {
+			getModel: () => s.model,
+			isIdle: () => !s.isStreaming,
+			abort: () => s.abort(),
+			hasPendingMessages: () => s.queuedMessageCount > 0,
+			shutdown: () => {},
+			getContextUsage: () => s.getContextUsage(),
+			getSystemPrompt: () => s.systemPrompt,
+			compact: (instructionsOrOptions: unknown) =>
+				runExtensionCompact(s as never, instructionsOrOptions as never),
+		};
+
+		try {
+			runner.initialize(actions, contextActions);
+			runner.onError((err) => {
+				log.warn(`extension error in ${err.extensionPath ?? "<unknown>"}`, err.error);
+			});
+			await runner.emit({ type: "session_start" });
+			log.info(`extension runner wired for session`);
+		} catch (err) {
+			log.warn(`extension runner wiring failed`, err);
+		}
 	}
 
 	private attach(session: AgentSession, cwd: string, sessionManager: SessionManager): InProcessSessionHandle {
