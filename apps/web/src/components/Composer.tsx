@@ -17,6 +17,7 @@ import { Paperclip, ArrowUp, Square, X } from "lucide-react";
 import type { ImageAttachment } from "@omp-deck/protocol";
 
 import { selectActiveSession, useStore } from "@/lib/store";
+import { useComposerHistory } from "@/lib/use-composer-history";
 import { cn } from "@/lib/utils";
 
 interface PendingImage extends ImageAttachment {
@@ -59,6 +60,14 @@ export function Composer() {
 	const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
 	const [slashSelected, setSlashSelected] = useState(0);
 	const sessionCwd = session?.cwd;
+
+	// ─── Prompt history (T-10) ──────────────────────────────────────────────
+	//
+	// Mirrors the omp TUI's ArrowUp recall. Keyed by sessionCwd so two windows
+	// pointed at different repos do not share history. The hook itself is
+	// stable across renders; we only need to know when the recall replaces the
+	// draft to update caret + autoresize.
+	const history = useComposerHistory(sessionCwd);
 
 	useEffect(() => {
 		if (!sessionCwd) {
@@ -320,6 +329,10 @@ export function Composer() {
 		if (!hasContent || disabled) return;
 		const payload: ImageAttachment[] = images.map(({ id: _id, preview: _p, ...rest }) => rest);
 		sendPrompt(text, payload.length > 0 ? payload : undefined);
+		// Record the prompt for ArrowUp recall. The hook collapses consecutive
+		// duplicates and ignores recall-then-send-unmodified, so we don't have
+		// to track that here.
+		if (text.length > 0) history.push(text);
 		setDraft("");
 		setImages([]);
 		imagesRef.current = [];
@@ -385,6 +398,60 @@ export function Composer() {
 				// to refine the query) just fall through to the default editor.
 				setDraft((prev) => prev.replace(/^\/\S*/, ""));
 				return;
+			}
+		}
+		// History recall (ArrowUp / ArrowDown). Only fires once the slash and
+		// path pickers have already passed, so their navigation always wins
+		// while open. Caret rule mirrors a shell: ArrowUp recalls only when the
+		// caret is on the first visual line of the textarea (no newline before
+		// it); ArrowDown only on the last line. That keeps multi-line composition
+		// usable — pressing ArrowUp inside paragraph 2 still moves the caret.
+		if (
+			e.key === "ArrowUp" &&
+			!e.shiftKey &&
+			!e.metaKey &&
+			!e.ctrlKey &&
+			!e.altKey
+		) {
+			const ta = e.currentTarget;
+			const pos = ta.selectionStart ?? 0;
+			if (!draft.slice(0, pos).includes("\n")) {
+				const recalled = history.up(draft);
+				if (recalled !== null) {
+					e.preventDefault();
+					setDraft(recalled);
+					queueMicrotask(() => {
+						const end = recalled.length;
+						ta.setSelectionRange(end, end);
+						setCaretPos(end);
+						autoresize();
+					});
+					return;
+				}
+			}
+		}
+		if (
+			e.key === "ArrowDown" &&
+			!e.shiftKey &&
+			!e.metaKey &&
+			!e.ctrlKey &&
+			!e.altKey
+		) {
+			const ta = e.currentTarget;
+			const pos = ta.selectionStart ?? 0;
+			if (!draft.slice(pos).includes("\n") && history.isWalking()) {
+				const recalled = history.down();
+				if (recalled !== null) {
+					e.preventDefault();
+					setDraft(recalled);
+					queueMicrotask(() => {
+						const end = recalled.length;
+						ta.setSelectionRange(end, end);
+						setCaretPos(end);
+						autoresize();
+					});
+					return;
+				}
 			}
 		}
 		if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
