@@ -111,6 +111,129 @@ describe("executeDeckStep", () => {
 		expect(moved?.stateId).toBe(done.id);
 	});
 
+	test("move_task into s_done emits an agent-ship notification", async () => {
+		bootDb();
+		// Subscribe a recording channel for the duration of the test. The
+		// service-singleton is module-scoped, so we register + unregister to
+		// isolate from siblings.
+		const { notificationService } = await import("../../notifications/index.ts");
+		const received: Array<{ title: string; level: string; source?: string; sound?: boolean }> = [];
+		notificationService.register({
+			id: "test-recorder",
+			deliver(envelope) {
+				received.push({
+					title: envelope.title,
+					level: envelope.level,
+					source: envelope.source,
+					sound: envelope.sound,
+				});
+			},
+		});
+		try {
+			const task = createTask({ title: "Ship me" });
+			const result = await executeDeckStep(
+				{
+					id: "ship",
+					type: "deck",
+					action: "move_task",
+					task_ref: `T-${task.displayId}`,
+					state_ref: "done",
+				},
+				ctx(),
+				AbortSignal.timeout(1000),
+			);
+			expect(result.status).toBe("success");
+			// notify() is fire-and-forget (void) — flush the microtask queue
+			// before asserting.
+			await new Promise((r) => setTimeout(r, 0));
+			expect(received).toHaveLength(1);
+			expect(received[0]?.title).toBe(`Agent shipped: ${task.title}`);
+			expect(received[0]?.level).toBe("info");
+			expect(received[0]?.sound).toBe(true);
+			expect(received[0]?.source).toContain(`task:${task.id}`);
+		} finally {
+			notificationService.unregister("test-recorder");
+		}
+	});
+
+	test("move_task to a non-done state does NOT notify", async () => {
+		bootDb();
+		const { notificationService } = await import("../../notifications/index.ts");
+		const received: Array<unknown> = [];
+		notificationService.register({
+			id: "test-recorder",
+			deliver(envelope) {
+				received.push(envelope);
+			},
+		});
+		try {
+			const task = createTask({ title: "Stay put" });
+			const result = await executeDeckStep(
+				{
+					id: "shuffle",
+					type: "deck",
+					action: "move_task",
+					task_ref: `T-${task.displayId}`,
+					state_ref: "active",
+				},
+				ctx(),
+				AbortSignal.timeout(1000),
+			);
+			expect(result.status).toBe("success");
+			await new Promise((r) => setTimeout(r, 0));
+			expect(received).toHaveLength(0);
+		} finally {
+			notificationService.unregister("test-recorder");
+		}
+	});
+
+	test("move_task within s_done does NOT re-notify on reorder", async () => {
+		bootDb();
+		const { notificationService } = await import("../../notifications/index.ts");
+		const received: Array<unknown> = [];
+		notificationService.register({
+			id: "test-recorder",
+			deliver(envelope) {
+				received.push(envelope);
+			},
+		});
+		try {
+			// First move INTO done — should notify.
+			const task = createTask({ title: "Reorder me" });
+			await executeDeckStep(
+				{
+					id: "ship",
+					type: "deck",
+					action: "move_task",
+					task_ref: `T-${task.displayId}`,
+					state_ref: "done",
+				},
+				ctx(),
+				AbortSignal.timeout(1000),
+			);
+			await new Promise((r) => setTimeout(r, 0));
+			expect(received).toHaveLength(1);
+
+			// Second move stays in done — must NOT notify again.
+			await executeDeckStep(
+				{
+					id: "reorder",
+					type: "deck",
+					action: "move_task",
+					task_ref: `T-${task.displayId}`,
+					state_ref: "done",
+					index: 0,
+				},
+				ctx(),
+				AbortSignal.timeout(1000),
+			);
+			await new Promise((r) => setTimeout(r, 0));
+			expect(received).toHaveLength(1);
+		} finally {
+			notificationService.unregister("test-recorder");
+		}
+	});
+
 	test("promote_inbox_item_to_task creates task and marks inbox processed by default", async () => {
 		bootDb();
 		const item = createInbox({ kind: "capture", title: "Promote me", body: "hello" });

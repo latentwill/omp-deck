@@ -12,6 +12,7 @@ import {
 	moveTask,
 } from "../../db/tasks.ts";
 import { renderString } from "../template.ts";
+import { notificationService } from "../../notifications/index.ts";
 import type { RunContext, StepResult } from "../types.ts";
 
 type DeckStep = Extract<RoutineStep, { type: "deck" }>;
@@ -67,8 +68,23 @@ export async function executeDeckStep(
 				const stateRef = renderString(step.state_ref, context as unknown as Record<string, unknown>);
 				const task = findTaskByDisplayOrId(taskRef);
 				if (!task) return fail(startedMs, `task not found: ${taskRef}`);
-				const moved = moveTask(task.id, resolveStateRef(stateRef), step.index ?? 0);
+				const destStateId = resolveStateRef(stateRef);
+				const sourceStateId = task.stateId;
+				const moved = moveTask(task.id, destStateId, step.index ?? 0);
 				if (!moved) return fail(startedMs, `move failed for task: ${taskRef}`);
+				// Notify only on the agent-initiated transition INTO s_done. User
+				// drags + slash-command moves don't reach this code path. We gate
+				// on the actual state flip (sourceStateId != destStateId) so
+				// reordering within done doesn't spam.
+				if (destStateId === "s_done" && sourceStateId !== "s_done") {
+					void notificationService.notify({
+						level: "info",
+						sound: true,
+						title: `Agent shipped: ${moved.title}`,
+						body: `T-${moved.displayId}`,
+						source: `routine:${context.run.id}/task:${moved.id}`,
+					});
+				}
 				return ok(startedMs, `moved task T-${moved.displayId} -> ${moved.stateId} @${step.index ?? 0}`, moved);
 			}
 			case "promote_inbox_item_to_task": {
