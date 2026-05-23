@@ -579,6 +579,25 @@ export interface ImageAttachment {
 	mimeType: string;
 }
 
+/**
+ * Possible extension-UI dialog response shapes returned by the client when an
+ * agent (typically the `ask` tool, but any extension can use the same surface)
+ * has asked for a selection / confirmation / free-form input.
+ */
+export interface ExtUiDialogResponse {
+	/** Single selected option (for `select` / `input` / `editor`). */
+	value?: string;
+	/** Multi-select result. Reserved for future native multi-select; the
+	 *  current `ask` tool implementation issues a sequence of single selects. */
+	values?: string[];
+	/** `confirm` dialog answer. */
+	confirmed?: boolean;
+	/** True iff the user cancelled (Esc, modal close, tab close). */
+	cancelled?: true;
+	/** True iff the dialog timed out before the user responded. */
+	timedOut?: true;
+}
+
 /** Client → Server. */
 export type ClientFrame =
 	| { type: "ping" }
@@ -591,7 +610,13 @@ export type ClientFrame =
 			images?: ImageAttachment[];
 			streamingBehavior?: "steer" | "followUp";
 	  }
-	| { type: "abort"; sessionId: string };
+	| { type: "abort"; sessionId: string }
+	/** Response to an `ext_ui_dialog_open` frame. */
+	| ({
+			type: "ext_ui_dialog_response";
+			sessionId: string;
+			dialogId: string;
+	  } & ExtUiDialogResponse);
 
 /** Server → Client. */
 export type ServerFrame =
@@ -666,6 +691,56 @@ export type ServerFrame =
 			durationMs: number;
 			totalCostMicros: number;
 		}
+	/**
+	 * An extension UI dialog has opened in the named session. The web client
+	 * renders a modal of the matching shape and replies with
+	 * `ext_ui_dialog_response`. Used by the SDK `ask` tool today and by any
+	 * extension calling `ctx.ui.select/editor/confirm/input`.
+	 *
+	 * `kind` selects the rendered shape; not every field applies to every kind.
+	 * Strict superset of what `ask` needs so the same channel covers
+	 * extension-driven dialogs without protocol churn.
+	 */
+	| {
+			type: "ext_ui_dialog_open";
+			sessionId: string;
+			dialogId: string;
+			kind: "select" | "editor" | "confirm" | "input";
+			/** Title / prompt line shown above the controls. */
+			prompt: string;
+			/** select: option labels in display order. */
+			options?: string[];
+			/** select: hint that the dialog allows multiple selections. */
+			multi?: boolean;
+			/** select: index of the option pre-focused on open. */
+			initialIndex?: number;
+			/** select: index of the "recommended" option (visually marked). */
+			recommended?: number;
+			/** select: ancillary help text below the options. */
+			helpText?: string;
+			/** confirm: secondary message body. */
+			message?: string;
+			/** input: placeholder text. */
+			placeholder?: string;
+			/** editor: initial textarea contents. */
+			prefill?: string;
+			/** editor: render with the prompt styled like the chat composer. */
+			promptStyle?: boolean;
+			/** Server-side timeout in ms; UI may render a countdown. 0 / absent = none. */
+			timeoutMs?: number;
+	  }
+	/**
+	 * The server-side promise behind a previously-opened dialog has been
+	 * cancelled (signal aborted, session disposed, server-side timeout fired).
+	 * The web client should close the matching modal without sending a
+	 * response — the SDK call is already settled.
+	 */
+	| {
+			type: "ext_ui_dialog_cancel";
+			sessionId: string;
+			dialogId: string;
+			reason: "session_disposed" | "timeout" | "aborted";
+	  }
 	| { type: "error"; sessionId?: string; error: string };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -688,6 +763,7 @@ export const KNOWN_TOOLS = [
 	"browser",
 	"ast_edit",
 	"ast_grep",
+	"ask",
 ] as const;
 
 export type KnownTool = (typeof KNOWN_TOOLS)[number];

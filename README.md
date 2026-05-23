@@ -237,10 +237,13 @@ request. The deck never logs values, only redacted forms.
   [opus-extensions/omp-themes/horizon.json](https://github.com/vincitamore/misc/tree/main/opus-extensions/omp-themes)).
 - External links open in a new tab across every markdown surface.
 - CRLF-tolerant frontmatter parsing fixes Windows-saved YAML.
+- Interactive `ask` tool bridged into the web UI via the new `ext_ui_dialog_*`
+  WS frames — the agent can now ask the user mid-execution and receive
+  selections / free-form text. Same channel also powers any extension calling
+  `ctx.ui.select / editor / confirm / input`.
 
 **Still deferred:**
 
-- Permission prompts (`ask` tool) via bidirectional WS UI bridge.
 - Plan-mode UI (banner + plan file viewer).
 - File browser in the inspector.
 - Subprocess-per-session bridge impl for crash isolation.

@@ -21,14 +21,17 @@ import { executeAcpBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-c
 import type {
 	AgentMessageJson,
 	AgentSessionEventJson,
+	ExtUiDialogResponse,
 	ModelInfo,
 	ModelRef,
+	ServerFrame,
 	SessionSnapshot,
 	SessionSummary,
 } from "@omp-deck/protocol";
 
 import { logger } from "../log.ts";
 import { getDeckModelRegistry } from "../auth-singleton.ts";
+import { ExtensionUIBridge } from "./ext-ui-bridge.ts";
 import type {
 	AgentBridge,
 	CreateSessionOpts,
@@ -100,6 +103,8 @@ interface Active {
 	turnInFlight: boolean;
 	/** Set of WS connection ids currently subscribed. Reaping requires zero subscribers. */
 	subscribers: Set<string>;
+	/** Per-session bridge from SDK `ExtensionUIContext` calls to deck WS frames. */
+	uiBridge: ExtensionUIBridge;
 }
 
 export class InProcessAgentBridge implements AgentBridge {
@@ -138,6 +143,10 @@ export class InProcessAgentBridge implements AgentBridge {
 			// flashes a python.exe console window each turn-zero; on demand spawn is fine.
 			skipPythonPreflight: true,
 			systemPrompt: (defaults) => [OMP_DECK_CONTEXT, ...defaults],
+			// Tell the SDK this session has a UI — gates the `ask` tool registration
+			// and any extension that calls `ctx.ui.*`. The actual ExtensionUIContext
+			// is installed via `setToolUIContext(...)` below.
+			hasUI: true,
 			// `opts.model` is a ModelRef ({provider,id}); the SDK's `model` option expects a
 			// fully-shaped Model — resolve via the registry when present.
 			...(opts.model
@@ -158,7 +167,7 @@ export class InProcessAgentBridge implements AgentBridge {
 			log.info(`extension paths: ${ext.extensions.map(e => (e as { path?: string }).path ?? "<unknown>").join(" | ")}`);
 		}
 		await this.wireExtensionRunner(session);
-		const handle = this.attach(session, opts.cwd, sessionManager);
+		const handle = this.attach(session, opts.cwd, sessionManager, result.setToolUIContext);
 		if (!opts.suppressAutoStart && this.autoStartCommand) {
 			this.pendingAutoPrompts.set(handle.sessionId, this.autoStartCommand);
 		}
@@ -177,13 +186,15 @@ export class InProcessAgentBridge implements AgentBridge {
 			authStorage: modelRegistry.authStorage,
 			skipPythonPreflight: true,
 			systemPrompt: (defaults) => [OMP_DECK_CONTEXT, ...defaults],
+			hasUI: true,
 		});
 		const session = result.session;
-		const handle = this.attach(session, cwd, sessionManager);
+		const handle = this.attach(session, cwd, sessionManager, result.setToolUIContext);
 		await this.wireExtensionRunner(session);
 		log.info(`resumed session ${handle.sessionId} from ${opts.sessionPath}`);
 		return handle;
 	}
+
 
 	getSession(sessionId: string): SessionHandle | undefined {
 		return this.active.get(sessionId)?.handle;
@@ -408,8 +419,19 @@ export class InProcessAgentBridge implements AgentBridge {
 		}
 	}
 
-	private attach(session: AgentSession, cwd: string, sessionManager: SessionManager): InProcessSessionHandle {
+	private attach(
+		session: AgentSession,
+		cwd: string,
+		sessionManager: SessionManager,
+		setToolUIContext: import("@oh-my-pi/pi-coding-agent").CreateAgentSessionResult["setToolUIContext"],
+	): InProcessSessionHandle {
 		const sessionId = (session as any).sessionId as string;
+		const uiBridge = new ExtensionUIBridge(sessionId);
+		// Wire the per-session UI context into the SDK's tool-context store so
+		// `AskTool.execute(...)` (and any extension calling `ctx.ui.*`) reaches
+		// the deck UI via WebSocket frames.
+		setToolUIContext(uiBridge, true);
+
 		const handle = new InProcessSessionHandle({
 			session,
 			sessionManager,
@@ -417,6 +439,7 @@ export class InProcessAgentBridge implements AgentBridge {
 			sessionId,
 			getModelRegistry: () => this.ensureModelRegistry(),
 			onDispose: () => {
+				uiBridge.dispose();
 				this.active.delete(sessionId);
 				this.pendingAutoPrompts.delete(sessionId);
 			},
@@ -453,8 +476,37 @@ export class InProcessAgentBridge implements AgentBridge {
 			lastActivityAt: Date.now(),
 			turnInFlight: false,
 			subscribers: new Set(),
+			uiBridge,
 		});
 		return handle;
+	}
+
+	// ─── Extension UI dialog bridge surface ──────────────────────────────
+
+	subscribeUiFrames(
+		sessionId: string,
+		listener: (
+			frame: Extract<ServerFrame, { type: "ext_ui_dialog_open" | "ext_ui_dialog_cancel" }>,
+		) => void,
+	): () => void {
+		const entry = this.active.get(sessionId);
+		if (!entry) return () => {};
+		// Replay any already-open dialogs to the late subscriber so a page
+		// reload doesn't strand the user with an invisible blocking modal.
+		for (const frame of entry.uiBridge.getPendingFrames()) {
+			try {
+				listener(frame);
+			} catch (err) {
+				log.warn(`pending UI frame replay threw`, err);
+			}
+		}
+		return entry.uiBridge.subscribeFrames(listener);
+	}
+
+	respondToUiDialog(sessionId: string, dialogId: string, response: ExtUiDialogResponse): void {
+		const entry = this.active.get(sessionId);
+		if (!entry) return;
+		entry.uiBridge.handleResponse(dialogId, response);
 	}
 }
 

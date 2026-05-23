@@ -62,6 +62,10 @@ export class WsHub {
 				await this.handleAbort(ws, frame.sessionId);
 				return;
 
+			case "ext_ui_dialog_response":
+				this.handleExtUiDialogResponse(ws, frame);
+				return;
+
 			default:
 				send(ws, { type: "error", error: `unknown frame type` });
 		}
@@ -113,10 +117,28 @@ export class WsHub {
 			return;
 		}
 
-		const unsub = handle.subscribe((event) => {
+		const unsubSession = handle.subscribe((event) => {
 			send(ws, { type: "session_event", sessionId, event });
 		});
-		ws.data.subscriptions.set(sessionId, unsub);
+		// Mirror extension-UI dialog frames (ask tool etc.) into this connection.
+		// `subscribeUiFrames` also replays any already-open dialogs so a page-
+		// reload subscriber sees the pending modal immediately.
+		const unsubUi = this.bridge.subscribeUiFrames(sessionId, (frame) => {
+			send(ws, frame);
+		});
+		const teardown = (): void => {
+			try {
+				unsubSession();
+			} catch (err) {
+				log.warn(`session unsubscribe threw`, err);
+			}
+			try {
+				unsubUi();
+			} catch (err) {
+				log.warn(`ui unsubscribe threw`, err);
+			}
+		};
+		ws.data.subscriptions.set(sessionId, teardown);
 		this.bridge.trackSubscriberAdded(sessionId, connectionId);
 		send(ws, { type: "subscribed", sessionId, snapshot: handle.snapshot() });
 	}
@@ -182,6 +204,29 @@ export class WsHub {
 			await handle.abort();
 		} catch (err) {
 			send(ws, { type: "error", sessionId, error: `abort failed: ${String(err)}` });
+		}
+	}
+
+	private handleExtUiDialogResponse(
+		ws: ServerWebSocket<ConnectionData>,
+		frame: Extract<ClientFrame, { type: "ext_ui_dialog_response" }>,
+	): void {
+		// We don't gate on subscription state here: a user can answer a dialog
+		// from any connection that received the open frame (the bridge replays
+		// pending frames on subscribe). Bumping activity keeps the reaper away
+		// while the user is mid-decision.
+		this.bridge.bumpActivity(frame.sessionId);
+		const { type: _t, sessionId, dialogId, ...response } = frame;
+		void _t;
+		try {
+			this.bridge.respondToUiDialog(sessionId, dialogId, response);
+		} catch (err) {
+			log.warn(`respondToUiDialog threw`, err);
+			send(ws, {
+				type: "error",
+				sessionId,
+				error: `ext_ui_dialog_response failed: ${String(err)}`,
+			});
 		}
 	}
 }

@@ -2,9 +2,11 @@ import type {
 	AgentMessageJson,
 	AgentSessionEventJson,
 	ContextUsage,
+	ExtUiDialogResponse,
 	ImageAttachment,
 	ModelInfo,
 	ModelRef,
+	ServerFrame,
 	SessionSnapshot,
 	SessionSummary,
 } from "@omp-deck/protocol";
@@ -29,6 +31,18 @@ export interface AgentBridge {
 	applyEnvUpdate?(update: RuntimeEnvUpdate): void;
 	/** Catalog of models the SDK knows about, plus a marker on the current one when sessionId is given. */
 	listModels(opts?: { sessionId?: string }): Promise<ModelInfo[]>;
+	/**
+	 * Subscribe to extension-UI dialog frames for `sessionId` (open + cancel).
+	 * Returns an unsubscribe function. Implementations MAY immediately replay
+	 * any already-open dialogs to a new subscriber so a late client (page
+	 * reload, second tab) does not miss an active modal.
+	 */
+	subscribeUiFrames(
+		sessionId: string,
+		listener: (frame: Extract<ServerFrame, { type: "ext_ui_dialog_open" | "ext_ui_dialog_cancel" }>) => void,
+	): () => void;
+	/** Settle a previously-emitted dialog with the client's response. */
+	respondToUiDialog(sessionId: string, dialogId: string, response: ExtUiDialogResponse): void;
 	dispose(): Promise<void>;
 }
 

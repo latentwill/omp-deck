@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 
 import type {
+	ExtUiDialogResponse,
 	ListSessionsResponse,
 	ListWorkspacesResponse,
 	SessionSummary,
@@ -93,6 +94,17 @@ interface StoreState {
 	 */
 	kbChangeCounter: number;
 
+	/**
+	 * Per-session open extension-UI dialog (currently used by the SDK `ask`
+	 * tool, but the channel is shape-typed to cover any extension dialog).
+	 * At most one dialog per session is open at a time because the SDK awaits
+	 * each `ctx.ui.*` call serially; if a second open arrives it replaces the
+	 * first (the server-side bridge already cancelled the predecessor before
+	 * sending the new one). Cleared on `ext_ui_dialog_cancel` and on local
+	 * response submission.
+	 */
+	pendingDialogs: Record<string, Extract<ServerFrame, { type: "ext_ui_dialog_open" }>>;
+
 	// ─── Actions ─────────────────────────────────────────────────────────
 	bootstrap(): Promise<void>;
 	connect(): void;
@@ -110,6 +122,8 @@ interface StoreState {
 	setPendingDraft(draft: { text: string } | undefined): void;
 	setSidebarOpen(open: boolean): void;
 	setInspectorOpen(open: boolean): void;
+	/** Send a dialog response over the WS and clear it locally. */
+	respondToExtUiDialog(sessionId: string, dialogId: string, response: ExtUiDialogResponse): void;
 }
 
 export const useStore = create<StoreState>()(
@@ -125,6 +139,7 @@ export const useStore = create<StoreState>()(
 		tasksChangeCounter: 0,
 		skillsChangeCounter: 0,
 		kbChangeCounter: 0,
+		pendingDialogs: {},
 		// Hydrate chrome state from localStorage at module init so first render
 		// matches the user's last preference — but only on desktop. On mobile the
 		// panels are overlay drawers and always start closed.
@@ -276,6 +291,24 @@ export const useStore = create<StoreState>()(
 			}
 			set({ inspectorOpen: open });
 		},
+
+		respondToExtUiDialog(sessionId, dialogId, response) {
+			// Clear local state first — the dialog modal closes immediately —
+			// then send the response over the WS so the SDK call settles.
+			set((s) => {
+				const current = s.pendingDialogs[sessionId];
+				if (!current || current.dialogId !== dialogId) return {};
+				const next = { ...s.pendingDialogs };
+				delete next[sessionId];
+				return { pendingDialogs: next };
+			});
+			get().ws?.send({
+				type: "ext_ui_dialog_response",
+				sessionId,
+				dialogId,
+				...response,
+			});
+		},
 	})),
 );
 
@@ -328,12 +361,31 @@ function handleFrame(
 			set((s) => ({ kbChangeCounter: s.kbChangeCounter + 1 }));
 			return;
 
+		case "ext_ui_dialog_open":
+			set((s) => ({
+				pendingDialogs: { ...s.pendingDialogs, [frame.sessionId]: frame },
+			}));
+			return;
+
+		case "ext_ui_dialog_cancel":
+			set((s) => {
+				const current = s.pendingDialogs[frame.sessionId];
+				if (!current || current.dialogId !== frame.dialogId) return {};
+				const next = { ...s.pendingDialogs };
+				delete next[frame.sessionId];
+				return { pendingDialogs: next };
+			});
+			return;
+
 		case "session_disposed":
 			set((s) => {
-				const next = { ...s.sessionsById };
-				delete next[frame.sessionId];
+				const nextSessions = { ...s.sessionsById };
+				delete nextSessions[frame.sessionId];
+				const nextDialogs = { ...s.pendingDialogs };
+				delete nextDialogs[frame.sessionId];
 				return {
-					sessionsById: next,
+					sessionsById: nextSessions,
+					pendingDialogs: nextDialogs,
 					activeId: s.activeId === frame.sessionId ? undefined : s.activeId,
 				};
 			});
