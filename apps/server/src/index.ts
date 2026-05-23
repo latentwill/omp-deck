@@ -17,6 +17,7 @@ import { logger } from "./log.ts";
 import { buildRouter } from "./routes.ts";
 import { WsHub, type ConnectionData } from "./ws.ts";
 import { MarketplaceService } from "./marketplace-service.ts";
+import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { SkillsService } from "./skills-service.ts";
 import { startSkillsWatcher } from "./skills-watcher.ts";
 import { KbService, resolveKbRoot } from "./kb-service.ts";
@@ -39,6 +40,19 @@ async function main(): Promise<void> {
 	});
 
 	openDb({ path: config.dbPath });
+
+	// Initialize the SDK's global `theme` so tools that reference symbols
+	// (e.g. ask -> getDoneOptionLabel -> `theme.status.success`) don't throw
+	// "undefined is not an object (evaluating 'theme.status')" when invoked
+	// from the deck. `dark` is a built-in theme JSON so no filesystem touch.
+	// Without this the `ask` tool fails at the first `askSingleQuestion`
+	// call, even though the deck UI doesn't render any SDK glyphs.
+	try {
+		const darkTheme = await getThemeByName("dark");
+		if (darkTheme) setThemeInstance(darkTheme);
+	} catch (err) {
+		log.warn(`SDK theme init failed; ask tool labels may not render`, err);
+	}
 	// Sync bundled starter skills into ~/.omp/agent/skills/ before the watcher
 	// spins up. Idempotent — never overwrites a user-edited target — so this
 	// is safe on every boot. Disable with OMP_DECK_INSTALL_STARTER_SKILLS=0.
