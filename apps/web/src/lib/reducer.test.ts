@@ -93,3 +93,65 @@ describe("reducer queue lifecycle", () => {
 		expect(fresh().queuedPrompts).toEqual([]);
 	});
 });
+
+/**
+ * T-106: bridge synthesizes `todo_phases_set` after every `todo_write`
+ * `tool_execution_end` so the Inspector doesn't show stale todos between
+ * SDK reminder ticks. Reducer must normalize the carried `todoPhases`
+ * into the same shape `todo_reminder` produces, and must coexist with
+ * the existing reminder path without one stomping the other.
+ */
+describe("reducer todo_phases_set (T-106)", () => {
+	test("replaces todoPhases with the carried snapshot, normalized", () => {
+		let s = fresh();
+		s = applyEvent(s, {
+			type: "todo_phases_set",
+			todoPhases: [
+				{
+					id: "phase-1",
+					name: "Merge",
+					tasks: [
+						{ id: "t1", content: "Stage A", status: "completed" },
+						{ id: "t2", content: "Stage B", status: "in_progress" },
+					],
+				},
+			],
+		} as never);
+		expect(s.todoPhases).toHaveLength(1);
+		expect(s.todoPhases[0]!.name).toBe("Merge");
+		expect(s.todoPhases[0]!.tasks.map((t) => t.status)).toEqual(["completed", "in_progress"]);
+	});
+
+	test("empty array clears todoPhases", () => {
+		let s = fresh();
+		s = applyEvent(s, {
+			type: "todo_phases_set",
+			todoPhases: [{ name: "phase", tasks: [{ content: "x", status: "pending" }] }],
+		} as never);
+		expect(s.todoPhases).toHaveLength(1);
+		s = applyEvent(s, { type: "todo_phases_set", todoPhases: [] } as never);
+		expect(s.todoPhases).toEqual([]);
+	});
+
+	test("missing todoPhases payload is treated as empty (defensive)", () => {
+		let s = fresh();
+		s = applyEvent(s, { type: "todo_phases_set" } as never);
+		expect(s.todoPhases).toEqual([]);
+	});
+
+	test("does not interfere with todo_reminder's existing wrap-once shape", () => {
+		let s = fresh();
+		// SDK-style reminder: single phase value (NOT wrapped)
+		s = applyEvent(s, {
+			type: "todo_reminder",
+			todos: { name: "from-reminder", tasks: [{ content: "x", status: "pending" }] },
+		} as never);
+		expect(s.todoPhases[0]!.name).toBe("from-reminder");
+		// Synthetic event then overrides cleanly with the canonical shape
+		s = applyEvent(s, {
+			type: "todo_phases_set",
+			todoPhases: [{ name: "from-sync", tasks: [{ content: "y", status: "completed" }] }],
+		} as never);
+		expect(s.todoPhases[0]!.name).toBe("from-sync");
+	});
+});

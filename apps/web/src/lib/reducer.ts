@@ -180,6 +180,14 @@ export function applyEvent(state: SessionUi, event: AgentSessionEventJson): Sess
 			const todos = (event as any).todos as unknown;
 			return { ...state, todoPhases: normalizeTodoPhases([todos]) };
 		}
+		// Synthetic event emitted by the deck bridge after every `todo_write`
+		// `tool_execution_end`. Carries the canonical `TodoPhase[]` from
+		// `session.getTodoPhases()` so the Inspector reflects in-turn changes
+		// without waiting for the next SDK reminder tick (T-106).
+		case "todo_phases_set": {
+			const phases = (event as { todoPhases?: unknown }).todoPhases;
+			return { ...state, todoPhases: normalizeTodoPhases(phases) };
+		}
 		case "todo_auto_clear":
 			return { ...state, todoPhases: [] };
 

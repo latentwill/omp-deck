@@ -443,6 +443,21 @@ export class InProcessAgentBridge implements AgentBridge {
 					handle.emit({ type: "context_usage", contextUsage: usage } as unknown as AgentSessionEventJson);
 				}
 			}
+			// Same pattern for todos: the SDK only fires `todo_reminder` on
+			// reminder ticks (typically at turn boundaries), so the deck UI
+			// shows stale todos between an agent's `todo_write` call and the
+			// next reminder cycle. Synthesize `todo_phases_set` after each
+			// todo_write tool result so the Inspector TodoPanel reflects the
+			// current phase tree within the same tick (T-106).
+			if (type === "tool_execution_end") {
+				const toolName = (event as { toolName?: string }).toolName;
+				if (toolName === "todo_write") {
+					const phases = (session as unknown as { getTodoPhases?: () => unknown[] }).getTodoPhases?.();
+					if (Array.isArray(phases)) {
+						handle.emit({ type: "todo_phases_set", todoPhases: phases } as unknown as AgentSessionEventJson);
+					}
+				}
+			}
 		});
 
 		this.active.set(sessionId, {
