@@ -5,6 +5,10 @@ All notable changes to omp-deck. The format is loosely based on
 
 ## [Unreleased]
 
+### Fixed
+
+- Fresh-clone `bun run dev` no longer fails on missing `TELEGRAM_BOT_TOKEN`. The root `dev` script was fanning out across every workspace (`--filter='@omp-deck/*'`) and bringing the standalone telegram bridge along with the deck server + web — the bridge's config validator throws if no bot token is set, so first-run users would hit an error before the UI ever came up. The bridge has always been opt-in (Settings → Messaging → Start, or `bun run dev:telegram`); the dev script now restricts itself to `@omp-deck/server` + `@omp-deck/web` to match the documented behavior in `CONTRIBUTING.md`.
+
 ## [0.3.0] — V1 routines, V2 canvas, reliability + notifications, orientation + chat polish
 
 Three big surfaces (V1 routines, V2 canvas builder, reliability + notification stack) land alongside a wave of smaller refinements (kanban polish, ask-tool bridge, starter skills, orientation Settings, queued prompts, kb:// resolution, image paste, app icon).

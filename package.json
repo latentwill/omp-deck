@@ -33,7 +33,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "bun run --filter='@omp-deck/*' dev",
+    "dev": "bun run --filter '@omp-deck/server' --filter '@omp-deck/web' dev",
     "dev:server": "bun run --filter '@omp-deck/server' dev",
     "dev:web": "bun run --filter '@omp-deck/web' dev",
     "dev:telegram": "bun run --filter '@omp-deck/telegram-bridge' dev",
