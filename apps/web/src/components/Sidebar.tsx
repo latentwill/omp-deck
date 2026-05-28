@@ -115,6 +115,7 @@ export function Sidebar() {
 						subtitle={shortPath(s.cwd, 30)}
 						active={s.sessionId === activeId}
 						live
+						planMode={s.planMode?.enabled === true}
 						onClick={() => selectSession(s.sessionId)}
 					/>
 				))}
@@ -149,6 +150,7 @@ function SessionRow({
 	meta,
 	active,
 	live,
+	planMode,
 	onClick,
 }: {
 	title: string;
@@ -156,6 +158,7 @@ function SessionRow({
 	meta?: string;
 	active?: boolean;
 	live?: boolean;
+	planMode?: boolean;
 	onClick: () => void;
 }) {
 	return (
@@ -174,6 +177,14 @@ function SessionRow({
 					<span className="h-1.5 w-1.5 shrink-0 rounded-full bg-line-strong" />
 				)}
 				<span className="truncate">{title}</span>
+				{planMode ? (
+					<span
+						className="ml-auto shrink-0 rounded border border-thinking/40 bg-thinking/10 px-1 py-px font-mono text-[10px] uppercase tracking-meta text-thinking"
+						title="Plan mode active"
+					>
+						plan
+					</span>
+				) : null}
 			</div>
 			{subtitle ? (
 				<div className="mt-0.5 truncate pl-3 font-mono text-2xs text-ink-3">

@@ -52,6 +52,8 @@ export function initSession(snapshot: SessionSnapshot): SessionUi {
 		turnCount: 0,
 		contextUsage: snapshot.contextUsage,
 		queuedPrompts: [],
+		planMode: snapshot.planMode,
+		pendingPlanApproval: snapshot.pendingPlanApproval,
 	};
 	for (const m of snapshot.messages) {
 		ingestMessage(state, m);

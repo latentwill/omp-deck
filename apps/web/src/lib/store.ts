@@ -6,6 +6,8 @@ import type {
 	ListSessionsResponse,
 	ListWorkspacesResponse,
 	NotificationLevel,
+	PendingPlanApprovalWire,
+	PlanModeContextWire,
 	SessionSummary,
 	ServerFrame,
 	WorkspaceEntry,
@@ -174,6 +176,24 @@ interface StoreState {
 	setInspectorOpen(open: boolean): void;
 	/** Send a dialog response over the WS and clear it locally. */
 	respondToExtUiDialog(sessionId: string, dialogId: string, response: ExtUiDialogResponse): void;
+	/**
+	 * Toggle plan mode on the active session (T-105). Idempotent on the wire;
+	 * server emits `plan_mode_changed` which the reducer mirrors back.
+	 */
+	setPlanMode(enabled: boolean): void;
+	/**
+	 * Reply to a `plan_proposed` card. Optimistically clears
+	 * `pendingPlanApproval` so the UI hides immediately; the server emits
+	 * `plan_proposal_resolved`, and on `error` (stale proposalId) the next
+	 * `plan_proposed` replay on subscribe will restore it.
+	 */
+	respondToPlanApproval(args: {
+		sessionId: string;
+		proposalId: string;
+		approved: boolean;
+		finalPath?: string;
+		editedContent?: string;
+	}): void;
 	/** Mark a notification as delivered to the OS so the renderer only fires once. */
 	markNotificationDelivered(id: string): void;
 	/** Hide an in-app toast for a notification (does not affect an already-delivered OS notif). */
@@ -372,6 +392,39 @@ export const useStore = create<StoreState>()(
 			});
 		},
 
+		setPlanMode(enabled) {
+			const id = get().activeId;
+			if (!id) return;
+			get().ws?.send({ type: "set_plan_mode", sessionId: id, enabled });
+		},
+
+		respondToPlanApproval({ sessionId, proposalId, approved, finalPath, editedContent }) {
+			// Optimistically clear the local approval card so the UI hides
+			// immediately. Server emits `plan_proposal_resolved`; if the
+			// proposalId is stale (sibling tab won the race), the bridge's
+			// own replay-on-subscribe will restore the next pending proposal
+			// (if any) without us having to roll back here.
+			set((s) => {
+				const prev = s.sessionsById[sessionId];
+				if (!prev || !prev.pendingPlanApproval) return {};
+				if (prev.pendingPlanApproval.proposalId !== proposalId) return {};
+				return {
+					sessionsById: {
+						...s.sessionsById,
+						[sessionId]: { ...prev, pendingPlanApproval: undefined },
+					},
+				};
+			});
+			get().ws?.send({
+				type: "plan_response",
+				sessionId,
+				proposalId,
+				approved,
+				...(finalPath !== undefined ? { finalPath } : {}),
+				...(editedContent !== undefined ? { editedContent } : {}),
+			});
+		},
+
 		markNotificationDelivered(id) {
 			set((s) => {
 				const i = s.notifications.findIndex((n) => n.id === id);
@@ -460,6 +513,60 @@ function handleFrame(
 				const next = { ...s.pendingDialogs };
 				delete next[frame.sessionId];
 				return { pendingDialogs: next };
+			});
+			return;
+
+		case "plan_mode_changed":
+			set((s) => {
+				const prev = s.sessionsById[frame.sessionId];
+				if (!prev) return {};
+				const planMode: PlanModeContextWire | undefined = frame.enabled
+					? { enabled: true, planFilePath: frame.planFilePath ?? "local://PLAN.md" }
+					: undefined;
+				// On exit, also drop any unresolved approval card — the bridge
+				// has already rejected its standing handler, so leaving the
+				// card visible would let the user click into a 409.
+				const pendingPlanApproval = frame.enabled ? prev.pendingPlanApproval : undefined;
+				return {
+					sessionsById: {
+						...s.sessionsById,
+						[frame.sessionId]: { ...prev, planMode, pendingPlanApproval },
+					},
+				};
+			});
+			return;
+
+		case "plan_proposed":
+			set((s) => {
+				const prev = s.sessionsById[frame.sessionId];
+				if (!prev) return {};
+				const pending: PendingPlanApprovalWire = {
+					proposalId: frame.proposalId,
+					planFilePath: frame.planFilePath,
+					planContent: frame.planContent,
+					suggestedTitle: frame.suggestedTitle,
+					suggestedFinalPath: frame.suggestedFinalPath,
+				};
+				return {
+					sessionsById: {
+						...s.sessionsById,
+						[frame.sessionId]: { ...prev, pendingPlanApproval: pending },
+					},
+				};
+			});
+			return;
+
+		case "plan_proposal_resolved":
+			set((s) => {
+				const prev = s.sessionsById[frame.sessionId];
+				if (!prev?.pendingPlanApproval) return {};
+				if (prev.pendingPlanApproval.proposalId !== frame.proposalId) return {};
+				return {
+					sessionsById: {
+						...s.sessionsById,
+						[frame.sessionId]: { ...prev, pendingPlanApproval: undefined },
+					},
+				};
 			});
 			return;
 

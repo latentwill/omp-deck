@@ -41,6 +41,8 @@ export function Composer() {
 	const sendPrompt = useStore((s) => s.sendPrompt);
 	const abort = useStore((s) => s.abort);
 	const clearQueue = useStore((s) => s.clearQueue);
+	const setPlanMode = useStore((s) => s.setPlanMode);
+	const planModeEnabled = session?.planMode?.enabled ?? false;
 	const pendingDraft = useStore((s) => s.pendingDraft);
 	const setPendingDraft = useStore((s) => s.setPendingDraft);
 	const queuedCount = session?.queuedPrompts.length ?? 0;
@@ -109,22 +111,44 @@ export function Composer() {
 		return afterSlash;
 	}, [draft]);
 
+	// Client-side virtual slash commands. Routed back to store actions
+	// instead of being sent over the WS as text. The bridge can't see
+	// them, which is fine — they're UI shortcuts, not agent prompts.
+	const virtualSlashCommands = useMemo<SlashCommand[]>(
+		() => [
+			{
+				name: "plan",
+				scope: "deck",
+				description: planModeEnabled
+					? "Exit plan mode (or Shift+Tab)"
+					: "Enter plan mode — agent reads + proposes only (or Shift+Tab)",
+				argumentHint: "[on|off]",
+			},
+		],
+		[planModeEnabled],
+	);
+
+	const allSlashCommands = useMemo(
+		() => [...virtualSlashCommands, ...slashCommands],
+		[virtualSlashCommands, slashCommands],
+	);
+
 	const filteredSlash = useMemo(() => {
 		if (slashQuery === null) return [];
-		if (slashCommands.length === 0) return [];
+		if (allSlashCommands.length === 0) return [];
 		const q = slashQuery.toLowerCase();
-		if (q === "") return slashCommands;
+		if (q === "") return allSlashCommands;
 		// Prefix match wins over substring match so typing the start of a name
 		// surfaces the obvious candidate at the top.
 		const prefix: SlashCommand[] = [];
 		const substr: SlashCommand[] = [];
-		for (const c of slashCommands) {
+		for (const c of allSlashCommands) {
 			const n = c.name.toLowerCase();
 			if (n.startsWith(q)) prefix.push(c);
 			else if (n.includes(q)) substr.push(c);
 		}
 		return [...prefix, ...substr];
-	}, [slashQuery, slashCommands]);
+	}, [slashQuery, allSlashCommands]);
 
 	// Reset highlighted row whenever the candidate list changes so we don't
 	// point at an index that's been filtered out.
@@ -229,8 +253,44 @@ export function Composer() {
 		[autoresize, mentionRange],
 	);
 
+	/**
+	 * Intercept client-side virtual slash commands (`/plan`, future ones).
+	 * Returns true when the command was handled and the caller should NOT
+	 * fall through to either drafting the command into the textarea or
+	 * sending it as a prompt over the WS.
+	 *
+	 * Accepts `args` separately so the same routing works both for
+	 * picker-clicks (no args yet) and for `send()` (caller parses
+	 * `/plan on` etc. and passes `"on"`).
+	 */
+	const dispatchVirtualCommand = useCallback(
+		(name: string, args: string): boolean => {
+			if (name === "plan") {
+				if (!session) return true; // swallow with no-op when no session
+				const arg = args.trim().toLowerCase();
+				if (arg === "on") setPlanMode(true);
+				else if (arg === "off") setPlanMode(false);
+				else setPlanMode(!planModeEnabled);
+				return true;
+			}
+			return false;
+		},
+		[session, planModeEnabled, setPlanMode],
+	);
+
 	const pickSlashCommand = useCallback(
 		(cmd: SlashCommand): void => {
+			// Virtual commands fire on pick and clear the draft — they take no
+			// args today, and the user has already telegraphed intent by
+			// clicking. Falling through to the draft-fill path would force
+			// them to also press Enter for no reason.
+			if (dispatchVirtualCommand(cmd.name, "")) {
+				setDraft("");
+				const ta = taRef.current;
+				if (ta) ta.style.height = "auto";
+				queueMicrotask(() => taRef.current?.focus());
+				return;
+			}
 			// Replace the entire leading slash token with the chosen command name
 			// and a trailing space. Preserve any whitespace-bounded remainder
 			// (rare — slashQuery !== null guarantees no internal space, but the
@@ -248,7 +308,7 @@ export function Composer() {
 				autoresize();
 			});
 		},
-		[autoresize],
+		[autoresize, dispatchVirtualCommand],
 	);
 
 	// Pull a pending draft (set by Tasks "Open in chat") into the composer
@@ -329,6 +389,21 @@ export function Composer() {
 		const text = draft;
 		const hasContent = text.trim().length > 0 || images.length > 0;
 		if (!hasContent || disabled) return;
+
+		// Intercept client-side virtual slash commands before the WS send.
+		// Shape: `/<name>[ <args>]`. Anything else falls through to sendPrompt.
+		if (text.startsWith("/") && images.length === 0) {
+			const trimmed = text.trim();
+			const spaceAt = trimmed.indexOf(" ");
+			const name = (spaceAt < 0 ? trimmed.slice(1) : trimmed.slice(1, spaceAt)).toLowerCase();
+			const args = spaceAt < 0 ? "" : trimmed.slice(spaceAt + 1);
+			if (dispatchVirtualCommand(name, args)) {
+				setDraft("");
+				const ta = taRef.current;
+				if (ta) ta.style.height = "auto";
+				return;
+			}
+		}
 		const payload: ImageAttachment[] = images.map(({ id: _id, preview: _p, ...rest }) => rest);
 		sendPrompt(text, payload.length > 0 ? payload : undefined);
 		// Record the prompt for ArrowUp recall. The hook collapses consecutive
@@ -343,6 +418,17 @@ export function Composer() {
 	}
 
 	function handleKey(e: KeyboardEvent<HTMLTextAreaElement>): void {
+		// Plan-mode toggle (Shift+Tab). Mirrors the TUI's `app.plan.toggle`
+		// keybinding. Highest priority — fires regardless of picker state,
+		// composer content, or streaming state. Idempotent on the wire; server
+		// echoes `plan_mode_changed` which the reducer mirrors back.
+		if (e.key === "Tab" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+			if (!session) return;
+			e.preventDefault();
+			setPlanMode(!planModeEnabled);
+			return;
+		}
+
 		// File-path mention picker has the highest priority — if the caret sits
 		// inside an `@token`, it owns Arrow / Enter / Tab / Esc the same way the
 		// slash picker does. Slash and file-path pickers are mutually exclusive
@@ -520,8 +606,10 @@ export function Composer() {
 
 				<div
 					className={cn(
-						"relative flex items-end gap-2 rounded-lg border border-line bg-paper-2 px-2 py-1.5",
-						"focus-within:border-ink/30",
+						"relative flex items-end gap-2 rounded-lg border bg-paper-2 px-2 py-1.5",
+						planModeEnabled
+							? "border-thinking/60 focus-within:border-thinking"
+							: "border-line focus-within:border-ink/30",
 					)}
 				>
 					<SlashCommandPicker
@@ -566,11 +654,13 @@ export function Composer() {
 						placeholder={
 							disabled
 								? "Pick a session first"
-								: isBusy
-									? "Streaming… enter to queue"
-									: dragOver
-										? "Drop images here"
-										: "Message omp…"
+								: planModeEnabled
+									? "Plan mode — agent reads + proposes only"
+									: isBusy
+										? "Streaming… enter to queue"
+										: dragOver
+											? "Drop images here"
+											: "Message omp…"
 						}
 						onChange={(e) => {
 							setDraft(e.target.value);
@@ -588,7 +678,6 @@ export function Composer() {
 						)}
 						disabled={disabled}
 					/>
-
 					{isBusy ? (
 						<button
 							type="button"

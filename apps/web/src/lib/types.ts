@@ -6,7 +6,7 @@
  * raw SDK events.
  */
 
-import type { ModelRef } from "@omp-deck/protocol";
+import type { ModelRef, PendingPlanApprovalWire, PlanModeContextWire } from "@omp-deck/protocol";
 
 // ─── Content blocks ────────────────────────────────────────────────────────
 
@@ -239,4 +239,13 @@ export interface SessionUi {
 	 * `message_start` arrives, or all at once on `queue_cleared`.
 	 */
 	queuedPrompts: QueuedPrompt[];
+
+	/**
+	 * Plan-mode state (T-105). `planMode` is present iff the session is in
+	 * plan mode at the moment of subscribe / since the last `plan_mode_changed`
+	 * frame. `pendingPlanApproval` is the unresolved card (set from
+	 * `plan_proposed`, cleared on `plan_proposal_resolved` / approval response).
+	 */
+	planMode?: PlanModeContextWire;
+	pendingPlanApproval?: PendingPlanApprovalWire;
 }
