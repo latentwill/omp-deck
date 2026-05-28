@@ -685,6 +685,13 @@ export type ClientFrame =
 			streamingBehavior?: "steer" | "followUp";
 	  }
 	| { type: "abort"; sessionId: string }
+	/**
+	 * Clear the session's pending-prompt queue (steering + follow-up).
+	 * The server replies with a synthetic `queue_cleared` session event
+	 * carrying the count of dropped entries so subscribed clients can
+	 * reconcile their `queuedPrompts` UI state.
+	 */
+	| { type: "clear_queue"; sessionId: string }
 	/** Response to an `ext_ui_dialog_open` frame. */
 	| ({
 			type: "ext_ui_dialog_response";

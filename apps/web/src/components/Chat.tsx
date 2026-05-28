@@ -8,6 +8,7 @@ import { Notice } from "./messages/Notice";
 import { CompactionLine } from "./messages/CompactionLine";
 import { TtsrLine } from "./messages/TtsrLine";
 import { IrcLine } from "./messages/IrcLine";
+import { QueuedMessage } from "./messages/QueuedMessage";
 
 export function Chat() {
 	const session = useStore(selectActiveSession);
@@ -16,6 +17,7 @@ export function Chat() {
 
 	const messages = session?.messages ?? [];
 	const toolCalls = session?.toolCalls ?? {};
+	const queuedPrompts = session?.queuedPrompts ?? [];
 
 	useEffect(() => {
 		const el = scrollRef.current;
@@ -23,7 +25,7 @@ export function Chat() {
 		if (stickyRef.current) {
 			el.scrollTop = el.scrollHeight;
 		}
-	}, [messages, toolCalls]);
+	}, [messages, toolCalls, queuedPrompts]);
 
 	function handleScroll(): void {
 		const el = scrollRef.current;
@@ -67,6 +69,10 @@ export function Chat() {
 								return null;
 						}
 					})}
+
+					{queuedPrompts.map((q) => (
+						<QueuedMessage key={q.id} msg={q} />
+					))}
 				</div>
 			</div>
 		</div>

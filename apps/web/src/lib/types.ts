@@ -120,6 +120,23 @@ export type ChatMessage =
 	| TtsrMsg
 	| IrcMsg;
 
+// ─── Queued prompts (sent while agent was streaming) ──────────────────────
+
+export interface QueuedPrompt {
+	/** Stable id assigned by the server when the SDK queued the prompt.
+	 *  Used as React key and for targeted future-cancellation if we add per-
+	 *  bubble × buttons later. */
+	id: string;
+	text: string;
+	images?: ImageBlock[];
+	/** "followUp" (run after current turn) vs "steer" (interrupt). Today every
+	 *  composer-driven prompt uses "followUp"; "steer" is reserved for a
+	 *  future affordance. */
+	behavior: "followUp" | "steer";
+	/** Bridge clock at enqueue. Used purely for chronological display. */
+	queuedAt: number;
+}
+
 // ─── Tool call lifecycle ───────────────────────────────────────────────────
 
 export interface ToolCallStream {
@@ -212,4 +229,14 @@ export interface SessionUi {
 
 	/** Latest provider error displayed in chrome (cleared on next turn_start). */
 	lastError?: string;
+
+	/**
+	 * Prompts the user sent while the agent was streaming. The SDK queues them
+	 * (as `followUp` by default) and runs each one as a new turn after the
+	 * current one finishes. We track them client-side so the chat renders a
+	 * visible "queued" bubble per pending prompt instead of swallowing the
+	 * draft silently. Dropped entry-by-entry when the matching real user
+	 * `message_start` arrives, or all at once on `queue_cleared`.
+	 */
+	queuedPrompts: QueuedPrompt[];
 }

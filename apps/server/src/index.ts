@@ -22,6 +22,8 @@ import { SkillsService } from "./skills-service.ts";
 import { startSkillsWatcher } from "./skills-watcher.ts";
 import { KbService, resolveKbRoot } from "./kb-service.ts";
 import { startKbWatcher } from "./kb-watcher.ts";
+import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls";
+import { KbProtocolHandler } from "./kb-protocol.ts";
 import { installStarterSkills } from "./starter-skills.ts";
 import { installStarterExtensions } from "./starter-extensions.ts";
 import { buildDefaultBridgeSupervisor } from "./bridge-supervisor.ts";
@@ -58,6 +60,14 @@ async function main(): Promise<void> {
 	if (!process.env.OMP_DECK_ORG_ROOT && !gateDisabled) {
 		process.env.OMP_DECK_ORG_ROOT = resolveKbRoot();
 	}
+
+	// Register the deck's `kb://` URI handler on the SDK's process-global
+	// router so `read kb://system/foo.md` resolves the same way the user's
+	// configured KB root (OMP_DECK_KB_ROOT or ~/kb) is served over REST.
+	// MUST run before the first `createAgentSession` — the router is a
+	// process singleton consulted by the `read` tool on every call.
+	InternalUrlRouter.instance().register(new KbProtocolHandler());
+
 	openDb({ path: config.dbPath });
 
 	// Initialize the SDK's global `theme` so tools that reference symbols

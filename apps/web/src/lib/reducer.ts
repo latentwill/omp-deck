@@ -14,6 +14,7 @@ import type {
 	ChatMessage,
 	ImageBlock,
 	NoticeMsg,
+	QueuedPrompt,
 	SessionUi,
 	TextBlock,
 	ToolCallStream,
@@ -50,6 +51,7 @@ export function initSession(snapshot: SessionSnapshot): SessionUi {
 		usage: { ...EMPTY_USAGE },
 		turnCount: 0,
 		contextUsage: snapshot.contextUsage,
+		queuedPrompts: [],
 	};
 	for (const m of snapshot.messages) {
 		ingestMessage(state, m);
@@ -296,6 +298,36 @@ export function applyEvent(state: SessionUi, event: AgentSessionEventJson): Sess
 				],
 			};
 		}
+
+		// ─── Prompt queue (synthetic events emitted by the bridge) ────────
+		// `prompt_queued` fires when the user sends a prompt while the agent
+		// is mid-turn — the SDK queues it and runs it once the current turn
+		// ends. Surface it as a visible bubble so the draft does not appear
+		// to vanish. `queue_cleared` fires when the SDK queue is dropped
+		// (explicit `clear_queue` from the user, or `abort` which mirrors
+		// stop-everything intent).
+		case "prompt_queued": {
+			const ev = event as {
+				queuedId?: string;
+				text?: string;
+				images?: ImageBlock[];
+				behavior?: "followUp" | "steer";
+			};
+			const entry: QueuedPrompt = {
+				id: typeof ev.queuedId === "string" && ev.queuedId.length > 0
+					? ev.queuedId
+					: nextId("queued"),
+				text: typeof ev.text === "string" ? ev.text : "",
+				behavior: ev.behavior === "steer" ? "steer" : "followUp",
+				queuedAt: Date.now(),
+			};
+			if (Array.isArray(ev.images) && ev.images.length > 0) entry.images = ev.images;
+			return { ...state, queuedPrompts: [...state.queuedPrompts, entry] };
+		}
+		case "queue_cleared":
+			return state.queuedPrompts.length === 0
+				? state
+				: { ...state, queuedPrompts: [] };
 	}
 	return state;
 }
@@ -321,14 +353,29 @@ function ingestMessage(state: SessionUi, msg: any): void {
 	if (!msg || typeof msg !== "object") return;
 	switch (msg.role) {
 		case "user": {
+			const text = extractText(msg.content);
+			const synthetic = Boolean(msg.synthetic);
 			state.messages.push({
 				id: nextId("user"),
 				role: "user",
-				text: extractText(msg.content),
+				text,
 				images: extractImages(msg.content),
 				timestamp: typeof msg.timestamp === "number" ? msg.timestamp : Date.now(),
-				synthetic: Boolean(msg.synthetic),
+				synthetic,
 			});
+			// If this real user message corresponds to a previously-queued prompt
+			// (same text, FIFO), drop the queued bubble so we don't render the
+			// same message twice. Synthetic round-trips (slash echoes) don't
+			// originate from the composer, so they never match the queue.
+			if (!synthetic && state.queuedPrompts.length > 0 && text.length > 0) {
+				const idx = state.queuedPrompts.findIndex((q) => q.text === text);
+				if (idx >= 0) {
+					state.queuedPrompts = [
+						...state.queuedPrompts.slice(0, idx),
+						...state.queuedPrompts.slice(idx + 1),
+					];
+				}
+			}
 			return;
 		}
 		case "assistant": {

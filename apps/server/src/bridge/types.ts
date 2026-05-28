@@ -74,6 +74,15 @@ export interface SessionHandle {
 		text: string,
 		opts?: { streamingBehavior?: "steer" | "followUp"; images?: ImageAttachment[] },
 	): Promise<void>;
+	/** True iff a turn is currently in-flight. Used by the WS layer to decide
+	 *  whether a freshly-arrived prompt is being queued vs. running immediately. */
+	isStreamingNow(): boolean;
+	/** Number of prompts the SDK currently has queued (steering + follow-up +
+	 *  hidden next-turn). */
+	queuedMessageCount(): number;
+	/** Drop every queued prompt. Returns the per-bucket counts that were
+	 *  cleared so the caller can surface a `queue_cleared` event. */
+	clearQueue(): { steering: number; followUp: number };
 	abort(): Promise<void>;
 	setName(name: string): Promise<void>;
 	/**

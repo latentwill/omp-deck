@@ -100,6 +100,10 @@ export class WsHub {
 				await this.handleAbort(ws, frame.sessionId);
 				return;
 
+			case "clear_queue":
+				this.handleClearQueue(ws, frame.sessionId);
+				return;
+
 			case "ext_ui_dialog_response":
 				this.handleExtUiDialogResponse(ws, frame);
 				return;
@@ -201,7 +205,11 @@ export class WsHub {
 			return;
 		}
 		const opts: { streamingBehavior?: "steer" | "followUp"; images?: typeof frame.images } = {};
-		if (frame.streamingBehavior) opts.streamingBehavior = frame.streamingBehavior;
+		// Default to "followUp" so a prompt sent while the agent is mid-turn is
+		// queued instead of throwing AgentBusyError (which the user never sees —
+		// it just looks like the message vanished). The web composer can still
+		// override to "steer" when we surface that affordance.
+		opts.streamingBehavior = frame.streamingBehavior ?? "followUp";
 		if (frame.images && frame.images.length > 0) opts.images = frame.images;
 		this.bridge.bumpActivity(frame.sessionId);
 		const sendError = (err: unknown): void => {
@@ -242,6 +250,20 @@ export class WsHub {
 			await handle.abort();
 		} catch (err) {
 			send(ws, { type: "error", sessionId, error: `abort failed: ${String(err)}` });
+		}
+	}
+
+	private handleClearQueue(ws: ServerWebSocket<ConnectionData>, sessionId: string): void {
+		const handle = this.bridge.getSession(sessionId);
+		if (!handle) {
+			send(ws, { type: "error", sessionId, error: "session not active" });
+			return;
+		}
+		this.bridge.bumpActivity(sessionId);
+		try {
+			handle.clearQueue();
+		} catch (err) {
+			send(ws, { type: "error", sessionId, error: `clear queue failed: ${String(err)}` });
 		}
 	}
 

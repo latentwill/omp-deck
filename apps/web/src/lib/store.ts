@@ -161,6 +161,10 @@ interface StoreState {
 	selectSession(id: string): void;
 	sendPrompt(text: string, images?: import("@omp-deck/protocol").ImageAttachment[]): void;
 	abort(): void;
+	/** Drop every queued (followUp / steering) prompt for the active session.
+	 *  Server echoes a `queue_cleared` session event that reconciles
+	 *  `queuedPrompts` in the reducer. */
+	clearQueue(): void;
 	disposeSession(id: string): Promise<void>;
 	renameSession(id: string, name: string): Promise<void>;
 	toggleAllToolCards(): void;
@@ -271,6 +275,12 @@ export const useStore = create<StoreState>()(
 			const id = get().activeId;
 			if (!id) return;
 			get().ws?.send({ type: "abort", sessionId: id });
+		},
+
+		clearQueue() {
+			const id = get().activeId;
+			if (!id) return;
+			get().ws?.send({ type: "clear_queue", sessionId: id });
 		},
 
 		async disposeSession(id: string) {

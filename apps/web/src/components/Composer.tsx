@@ -40,8 +40,10 @@ export function Composer() {
 	const session = useStore(selectActiveSession);
 	const sendPrompt = useStore((s) => s.sendPrompt);
 	const abort = useStore((s) => s.abort);
+	const clearQueue = useStore((s) => s.clearQueue);
 	const pendingDraft = useStore((s) => s.pendingDraft);
 	const setPendingDraft = useStore((s) => s.setPendingDraft);
+	const queuedCount = session?.queuedPrompts.length ?? 0;
 	const [draft, setDraft] = useState("");
 	const [images, setImages] = useState<PendingImage[]>([]);
 	const [dragOver, setDragOver] = useState(false);
@@ -565,7 +567,7 @@ export function Composer() {
 							disabled
 								? "Pick a session first"
 								: isBusy
-									? "Streaming… type to steer"
+									? "Streaming… enter to queue"
 									: dragOver
 										? "Drop images here"
 										: "Message omp…"
@@ -611,11 +613,23 @@ export function Composer() {
 					)}
 				</div>
 
-				<div className="mt-1.5 px-1 font-mono text-2xs text-ink-3">
-					{images.length > 0
-						? `${images.length} image${images.length === 1 ? "" : "s"} · `
-						: ""}
-					enter send · shift+enter newline · paste/drop image
+				<div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 px-1 font-mono text-2xs text-ink-3">
+					{queuedCount > 0 ? (
+						<button
+							type="button"
+							onClick={() => clearQueue()}
+							className="rounded border border-line bg-paper px-1.5 py-0.5 uppercase tracking-meta text-ink-2 hover:text-danger hover:border-danger/40"
+							title="Drop every queued prompt for this session"
+						>
+							{queuedCount} queued · cancel
+						</button>
+					) : null}
+					<span>
+						{images.length > 0
+							? `${images.length} image${images.length === 1 ? "" : "s"} · `
+							: ""}
+						enter send · shift+enter newline · paste/drop image
+					</span>
 				</div>
 			</div>
 		</div>
