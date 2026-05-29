@@ -5,6 +5,49 @@ All notable changes to omp-deck. The format is loosely based on
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-05-29 — First-run onboarding + provider clarity + reliability fixes
+
+Quality-of-life release driven by three live-demo reports plus a deliberate first-run-experience rewrite.
+
+**For existing users:** see [docs/upgrading.md](./docs/upgrading.md) — the onboarding wizard does NOT trigger for installs with existing sessions or a moved welcome task. Everything you have keeps working.
+
+### Onboarding wizard (#9)
+
+- **Five-step first-run flow** at `/onboarding`, gated by a server-detected `needsOnboarding` flag. Brand-new users get walked through: kb scaffold → provider auth (Claude Pro/Max or ChatGPT Plus/Pro OAuth, or OpenRouter API key) → optional `/start` greeting → handoff to chat.
+- **Returning-user detection** is silent: any existing session OR a welcome task that's not in backlog marks onboarding settled without ever showing the wizard. Existing installs upgrade cleanly.
+- **Welcome task tile** on `SessionPicker` surfaces the seeded `T-1` task even if the user never clicks the Tasks tab.
+- **Skip-but-remind toast** appears on the chat view if onboarding was X-ed out, pointing at `/onboarding` for a re-run.
+- New server module `apps/server/src/onboarding-state.ts` + routes at `/api/onboarding/{state,complete,seed-kb-system}`. Reuses existing endpoints (`/api/kb/init`, `/api/orientation/start`, `/api/settings/env`, `/api/auth/oauth/*`) for the actual work.
+- The wizard's `/start` template is static but the AGENT re-fetches live state on every fire (kb files, `/api/{tasks,routines,inbox}`), so it stays accurate as the deck grows.
+
+### Model-picker clarity (#7)
+
+- **`subscription` badge** in the model picker for genuine consumer-subscription providers (Claude Pro/Max, ChatGPT Plus/Pro, GitHub Copilot, Cursor, Perplexity Pro/Max, coding plans). Explicit allowlist — not the SDK's broader `getOAuthProviders()` which would have falsely badged Ollama / LM Studio / gateway services as "subscription."
+- **Placeholder API keys suppressed.** `OPENAI_API_KEY=sk-your-XXXXhere` (and other `.env.example` leftovers — `your-api-key`, `<your-key>`, `changeme`, length-too-short keys per prefix family) no longer mark API-key providers as authenticated. The picker hides those rows from the default view instead of letting users click them and get back a 401.
+- **401-recovery notification.** When a chat call returns auth-shaped error (`401`, `incorrect api key`, `unauthorized`) on an API-key provider AND a subscription provider carries the same model id with a real OAuth credential, the deck fires a `warn` notification suggesting the switch.
+
+### OAuth flow lifecycle (#7)
+
+- **5-minute server-side timeout** per OAuth flow. The SDK's own timeout only fires on the loopback callback listener — flows driven by `onPrompt` (e.g. Ollama endpoint input) could sit pending forever, blocking subsequent attempts with `409 already-in-flight`. Now force-cancelled.
+- **Stale-flow eviction** on `POST /:provider/start`. If a duplicate start arrives and the held flow is past the timeout window, evict it inline instead of 409-ing forever.
+- **`abortFlow` helper** drains `promptResolvers` too (latent bug — pre-fix `cancel` only rejected `manualCode`, leaving `onPrompt` deferreds hanging).
+- **OAuth consent button** now uses `variant="primary"` instead of inheriting the low-contrast default ghost variant.
+
+### Cross-platform reliability (#8)
+
+- **Bun executable resolution** falls back to `Bun.which("bun")` when `process.execPath` points at a dead path. Fixes a macOS-reported `posix_spawn ENOENT '~/.bun/bin/bun'` when the user reinstalled Bun via Homebrew / asdf / mise after deck boot. Affects both telegram-bridge spawn and `scheduleRestart`.
+
+### Added
+
+- `docs/upgrading.md` — version-by-version migration notes.
+- README "Global install" section rewritten to explicitly call out: `omp` CLI not required; Bun + Node prereqs; post-boot auth paths (OAuth or API key); and how the deck self-bootstraps `~/.omp/agent/` on first boot.
+- `apps/server/src/credential-quality.ts` with `looksLikePlaceholderKey` (44 unit-test assertions).
+- `apps/server/src/runtime-bun.ts` with `resolveBunExecutable` (4 tests).
+- `apps/server/src/onboarding-state.ts` + `routes-onboarding.ts` (4 tests).
+- `apps/server/src/routes-auth-oauth.test.ts` — 6 tests for the new `abortFlow` cleanup helper.
+- `ModelInfo.isSubscription` field in `@omp-deck/protocol`.
+- `OnboardingState` + `SeedKbSystem*` types in `@omp-deck/protocol`.
+
 ## [0.5.0] — 2026-05-28 — Cross-platform CI, Linux container, Mac/Linux launcher
 
 Infrastructure release. v0.4.0 advertised macOS and Linux support but had never been empirically verified — every release was "tested on a Windows box, presumed to work elsewhere." v0.5.0 closes that gap: every push to main now runs the gates on all three platforms under the same Bun version, the Docker image actually boots, and Mac/Linux users get a launcher with parity to the Windows one.
