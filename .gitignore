@@ -1,3 +1,6 @@
+# npm pack output
+omp-deck-*.tgz
+
 node_modules
 dist
 .DS_Store

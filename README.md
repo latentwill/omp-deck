@@ -60,6 +60,21 @@ omp-deck is the cockpit that holds all of that. The chat surface stays at parity
 
 ## Quickstart
 
+### Global install (recommended)
+
+Requires [Bun](https://bun.sh) ≥ 1.3.14.
+
+```sh
+npm install -g omp-deck
+omp-deck
+```
+
+Boots on <http://127.0.0.1:8787>. Data lives in `~/.omp-deck/` (override with `OMP_DECK_DATA_DIR`). Your existing `~/.omp/agent` is picked up automatically — no re-auth.
+
+Other knobs: `OMP_DECK_PORT`, `OMP_DECK_HOST`, `OMP_DECK_DB_PATH`, `OMP_DECK_UPLOADS_ROOT`, `OMP_DECK_WEB_DIST` — see [docs/configuration.md](./docs/configuration.md). Or run `bunx omp-deck` if you'd rather not install globally.
+
+### From source
+
 If `omp` already works in a terminal on this machine:
 
 ```sh
@@ -69,7 +84,7 @@ bun install
 bun run dev
 ```
 
-Open <http://127.0.0.1:5173>. Your existing `~/.omp/agent` is picked up automatically — no re-auth.
+Open <http://127.0.0.1:5173>.
 
 On **Windows**, you can also double-click `Start-OMP-Deck.cmd` from the repo root — it boots the server on `:8787`, starts the Vite app on `:5173`, opens the deck in your browser, and writes logs under `.logs/`. On **macOS / Linux**, the sibling is `bash Start-OMP-Deck.sh start` (`stop` / `status` subcommands too); bare invocation runs foreground, same as `bun run dev`.
 
