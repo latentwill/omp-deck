@@ -2,9 +2,9 @@
 
 **A calmer place to drive your coding agent.**
 
-The [`omp`](https://github.com/can1357/oh-my-pi) terminal agent is excellent at the actual coding. But terminals weren't built for everything that comes with running an agent for hours a day — keeping track of what it's working on, glancing at it from another room, picking up where it left off tomorrow, deciding whether to let it execute the thing it just proposed.
+The [`omp`](https://github.com/can1357/oh-my-pi) terminal agent is excellent at the actual coding. But terminals weren't built for everything that comes with running an agent for hours a day: keeping track of what it's working on, glancing at it from another room, picking up where it left off tomorrow, deciding whether to let it execute the thing it just proposed.
 
-omp-deck is the cockpit you drive omp from when the terminal isn't enough. Same agent, same authentication, same models. Different surface — one that gives the work a place to live.
+omp-deck is the cockpit you drive omp from when the terminal isn't enough. Same agent, same authentication, same models. This is a surface that gives the work a place to live.
 
 > **Status:** v0.4.0 — plan mode, queued-prompt editing, todo live-sync. See [CHANGELOG.md](./CHANGELOG.md).
 
