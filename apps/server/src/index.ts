@@ -14,6 +14,7 @@ import { RoutinesRunner } from "./routines-runner.ts";
 import { closeDb, openDb } from "./db/index.ts";
 import { loadConfig } from "./config.ts";
 import { logger } from "./log.ts";
+import { resolveBunExecutable } from "./runtime-bun.ts";
 import { buildRouter } from "./routes.ts";
 import { WsHub, type ConnectionData } from "./ws.ts";
 import { MarketplaceService } from "./marketplace-service.ts";
@@ -234,7 +235,11 @@ async function main(): Promise<void> {
 }
 
 function scheduleRestart(server: Server<ConnectionData>): RestartServerResponse {
-	const cmd = [process.execPath, ...process.argv.slice(1)];
+	// `process.execPath` directly here would suffer the same staleness issue
+	// as the bridge supervisor (issue #6 — user's bun moves between deck
+	// start and restart). Route through the shared resolver which falls back
+	// to a PATH lookup if the captured execPath is gone.
+	const cmd = [resolveBunExecutable(), ...process.argv.slice(1)];
 	const cwd = process.cwd();
 	setTimeout(() => {
 		log.info(`restart requested`, { cmd });

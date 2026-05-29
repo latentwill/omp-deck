@@ -4,6 +4,7 @@ import type { Subprocess } from "bun";
 import type { BridgeInfo, BridgeLogLine, BridgeName, BridgeStatus } from "@omp-deck/protocol";
 
 import { logger } from "./log.ts";
+import { resolveBunExecutable } from "./runtime-bun.ts";
 
 const log = logger("bridges");
 
@@ -99,7 +100,12 @@ export class BridgeSupervisor {
 		let proc: Subprocess;
 		try {
 			proc = Bun.spawn({
-				cmd: [process.execPath, t.spec.entry],
+				// Use the resolved Bun path rather than `process.execPath` directly.
+				// `process.execPath` can be stale (issue #6: user reinstalls Bun /
+				// uninstalls the official-installer copy / switches version managers
+				// after deck boot) and posix_spawn ENOENTs on it. `resolveBunExecutable`
+				// falls back to a PATH lookup.
+				cmd: [resolveBunExecutable(), t.spec.entry],
 				cwd: path.dirname(t.spec.entry),
 				env: { ...process.env } as Record<string, string>,
 				stdin: "ignore",
