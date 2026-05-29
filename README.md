@@ -62,20 +62,29 @@ omp-deck is the cockpit that holds all of that. The chat surface stays at parity
 
 ### Global install (recommended)
 
-Requires [Bun](https://bun.sh) ≥ 1.3.14.
+You don't need the `omp` CLI installed separately — the deck bundles the agent SDK in-process.
+
+**Prerequisites:** [Bun](https://bun.sh) ≥ 1.3.14 on your `PATH`, plus Node ≥ 18 (for `npm install` itself).
 
 ```sh
 npm install -g omp-deck
 omp-deck
 ```
 
-Boots on <http://127.0.0.1:8787>. Data lives in `~/.omp-deck/` (override with `OMP_DECK_DATA_DIR`). Your existing `~/.omp/agent` is picked up automatically — no re-auth.
+Boots on <http://127.0.0.1:8787> — open it in your browser. On first run, the deck creates `~/.omp/agent/` from scratch and installs starter skills + extensions; its own state lives in `~/.omp-deck/` (override with `OMP_DECK_DATA_DIR`). If you already use `omp` in a terminal on this machine, your existing `~/.omp/agent` is picked up automatically — no re-auth.
 
-Other knobs: `OMP_DECK_PORT`, `OMP_DECK_HOST`, `OMP_DECK_DB_PATH`, `OMP_DECK_UPLOADS_ROOT`, `OMP_DECK_WEB_DIST` — see [docs/configuration.md](./docs/configuration.md). Or run `bunx omp-deck` if you'd rather not install globally.
+**Authenticate (one-time, in the deck UI):**
 
-### From source
+- **Claude Pro / Max, ChatGPT Plus / Pro, or any subscription provider** → Settings → Providers → click *Sign in*. Browser OAuth flow handles the rest. Token stored in `~/.omp/agent/auth.db`.
+- **Anthropic / OpenAI / OpenRouter / Google / etc. API key** → Settings → Env → paste the key. Saved to the deck-managed `.env` (never logged in clear text).
 
-If `omp` already works in a terminal on this machine:
+That's it — pick a model in the chat surface and send a prompt.
+
+Other env knobs: `OMP_DECK_PORT`, `OMP_DECK_HOST`, `OMP_DECK_DB_PATH`, `OMP_DECK_UPLOADS_ROOT` — see [docs/configuration.md](./docs/configuration.md). Prefer to skip the global install? `bunx omp-deck` works too (same package, no PATH pollution).
+
+### From source (for development)
+
+If you're working on the deck itself or want hot reload + the Vite dev server:
 
 ```sh
 git clone https://github.com/bjb2/omp-deck.git
@@ -88,7 +97,7 @@ Open <http://127.0.0.1:5173>.
 
 On **Windows**, you can also double-click `Start-OMP-Deck.cmd` from the repo root — it boots the server on `:8787`, starts the Vite app on `:5173`, opens the deck in your browser, and writes logs under `.logs/`. On **macOS / Linux**, the sibling is `bash Start-OMP-Deck.sh start` (`stop` / `status` subcommands too); bare invocation runs foreground, same as `bun run dev`.
 
-If you don't have omp yet, see [docs/install.md](./docs/install.md) for the full path (install Bun → install the omp CLI → authenticate → clone + run). Or skip the CLI entirely and paste a provider API key into Settings → Env after the deck is up. For container-based deployment, the repo ships a `Dockerfile` (Debian-slim base, glibc-compatible); see [docs/deployment.md](./docs/deployment.md).
+For container-based deployment, the repo ships a `Dockerfile` (Debian-slim base, glibc-compatible); see [docs/deployment.md](./docs/deployment.md). For the full step-by-step (Bun install, optional `omp` CLI, auth alternatives), see [docs/install.md](./docs/install.md).
 
 ## How it compares
 

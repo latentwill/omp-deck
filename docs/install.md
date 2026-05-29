@@ -1,8 +1,16 @@
 # Installing omp-deck
 
 omp-deck is the cockpit UI for [`oh-my-pi`](https://github.com/can1357/oh-my-pi)
-(`omp`). There are two install paths depending on whether you already use omp
-on this machine.
+(`omp`).
+
+> **Fastest path:** `npm install -g omp-deck && omp-deck` — needs Bun ≥ 1.3.14
+> on `PATH`. Boots on <http://127.0.0.1:8787>; authenticate via Settings →
+> Providers (OAuth) or Settings → Env (API key). The `omp` CLI is **not**
+> required — the deck bundles the SDK in-process. See the [README quickstart](../README.md#quickstart).
+
+The longer paths below clone from source and are aimed at contributors or
+users who want the Vite dev server + hot reload. Two flavors depending on
+whether you already use omp on this machine:
 
 - [Path A — You already have omp installed and authenticated](#path-a--existing-omp-user)
 - [Path B — Fresh install (no omp yet)](#path-b--fresh-install)
