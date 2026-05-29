@@ -5,6 +5,12 @@ All notable changes to omp-deck. The format is loosely based on
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-05-28 — Cross-platform CI, Linux container, Mac/Linux launcher
+
+Infrastructure release. v0.4.0 advertised macOS and Linux support but had never been empirically verified — every release was "tested on a Windows box, presumed to work elsewhere." v0.5.0 closes that gap: every push to main now runs the gates on all three platforms under the same Bun version, the Docker image actually boots, and Mac/Linux users get a launcher with parity to the Windows one.
+
+Two real Linux bugs surfaced during the validation work and are fixed in this release.
+
 ### Fixed
 
 - **Docker build is now correct end-to-end on Linux.** Two regressions were silently broken before v0.4.0 even though `docs/deployment.md` advertised the path:

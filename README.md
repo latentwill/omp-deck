@@ -6,7 +6,7 @@ The [`omp`](https://github.com/can1357/oh-my-pi) terminal agent is excellent at 
 
 pi is known for its flexibility and omp applies some opinions on how to leverage it more effectively. omp-deck is best understood as a web interface for omp with a small set of additional opinions applied on top of omp. 
 
-> **Status:** v0.4.0 — plan mode, queued-prompt editing, todo live-sync. See [CHANGELOG.md](./CHANGELOG.md).
+> **Status:** v0.5.0 — cross-platform CI matrix, Linux container builds and boots, Mac/Linux launcher. See [CHANGELOG.md](./CHANGELOG.md).
 
 ![omp-deck chat surface — live tool calls + orientation summary](./docs/screenshots/00-hero-chat-paper.png)
 
