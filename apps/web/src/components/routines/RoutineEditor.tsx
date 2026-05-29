@@ -447,7 +447,7 @@ function V0Editor({
 						<button
 							type="button"
 							onClick={() => void runNow()}
-							className="btn-ghost text-xs"
+							className="btn-ghost h-7 px-2.5 text-xs"
 							title="Run now (out of schedule)"
 						>
 							Run now
@@ -457,7 +457,7 @@ function V0Editor({
 						type="button"
 						onClick={() => void save()}
 						disabled={busy || !form.name.trim() || !form.cron.trim() || !form.actionBody.trim()}
-						className="btn-primary text-xs"
+						className="btn-primary h-7 px-2.5 text-xs"
 					>
 						{isNew ? "Create" : "Save"}
 					</button>
