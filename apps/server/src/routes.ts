@@ -1,4 +1,7 @@
 import { Hono } from "hono";
+import { readFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
 import type {
 	CreateSessionRequest,
 	CreateSessionResponse,
@@ -199,6 +202,45 @@ export function buildRouter(
 			return c.json({ ok: true, sessionId: id });
 		} catch (err) {
 			log.error(`patch session failed`, err);
+			return c.json({ error: String((err as Error).message ?? err) }, 500);
+		}
+	});
+
+	// ── Session content (T-11) ──────────────────────────────────────────
+	app.get("/sessions/:id/content", async (c) => {
+		const id = c.req.param("id");
+		try {
+			// Check active sessions first via bridge handle
+			const handle = bridge.getSession(id);
+			const sessionPath = handle?.sessionFile;
+
+			// Fall back to listing all sessions for inactive ones
+			let jsonlPath: string | undefined = sessionPath ?? undefined;
+			if (!jsonlPath) {
+				const allSessions = await bridge.listSessions({});
+				const found = allSessions.find((s) => s.id === id);
+				if (found) jsonlPath = found.path;
+			}
+
+			if (!jsonlPath) {
+				return c.json({ error: "session not found" }, 404);
+			}
+
+			// Stream-read the JSONL file line by line
+			const messages: unknown[] = [];
+			const rl = createInterface({ input: createReadStream(jsonlPath), crlfDelay: Infinity });
+			for await (const line of rl) {
+				const trimmed = line.trim();
+				if (!trimmed) continue;
+				try {
+					messages.push(JSON.parse(trimmed));
+				} catch {
+					// skip unparseable lines
+				}
+			}
+			return c.json({ sessionId: id, messages });
+		} catch (err) {
+			log.error(`session content read failed`, err);
 			return c.json({ error: String((err as Error).message ?? err) }, 500);
 		}
 	});
