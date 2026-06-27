@@ -24,6 +24,7 @@ export default defineConfig({
 	server: {
 		host: SERVER_HOST,
 		port: WEB_PORT,
+		allowedHosts: ["dam.tail2bb69.ts.net", ".tail2bb69.ts.net"],
 		proxy: {
 			"/api": { target: SERVER_HTTP, changeOrigin: true },
 			"/ws": { target: SERVER_WS, ws: true, changeOrigin: true },
